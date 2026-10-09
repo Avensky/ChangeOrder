@@ -8,12 +8,8 @@
 
 ### Team Members
 
-- Aadi Bery (sdsuaiclub@gmail.com)
-- Jaylan Luong (jluong5067@sdsu.edu)
-- Uriel Zacarias (urielzacarias@gmail.com)
-- Tad Schiller (tad@zacksmithplumbing.com)
-- Ajay (arao3465@sdsu.edu)
-- Bona O'Quinn (boquinn1053@sdsu.edu)
+- Uriel Zacarias
+- Additional collaborators and assignments have not been specified.
 
 ## 1. System Description
 
@@ -300,33 +296,28 @@ Every tenant-owned record includes companyId and timestamps even when omitted fr
 
 ### 7.2 Core associations
 
-```mermaid
-classDiagram
-direction TB
-class Project
-class WorkOrder
-class WorkOrderRevision
-class ChangeEvent
-class ChangeOrder
-class ChangeOrderRevision
-class ApprovalRequest
-class ApprovalDecision
-class WorkAuthorization
-class OutboxEvent
-class Notification
-class NotificationDelivery
-Project "1" --> "0..*" WorkOrder
-WorkOrder "1" *-- "1..*" WorkOrderRevision
-WorkOrderRevision "1" <-- "0..*" ChangeEvent : original scope
-ChangeEvent "1" --> "0..1" ChangeOrder
-ChangeOrder "1" *-- "1..*" ChangeOrderRevision
-ChangeOrderRevision "1" --> "0..*" ApprovalRequest
-ApprovalRequest "1" --> "0..1" ApprovalDecision
-ApprovalDecision "0..1" <-- "0..*" WorkAuthorization
-ApprovalDecision ..> OutboxEvent : commits event
-OutboxEvent "1" --> "0..*" Notification
-Notification "1" --> "0..*" NotificationDelivery
-```
+The associations are split into three compact views so they fit in both Markdown and PDF. Read 0..1 as zero or one, 0.._ as zero or more, and 1.._ as one or more. A diamond marks composition; a dashed arrow marks an application dependency.
+
+![Original scope and reporting associations](core-associations-scope.png)
+
+![Revision and approval associations](core-associations-approvals.png)
+
+![Notification delivery associations](core-associations-notifications.png)
+
+| Association                            | Cardinality   | Meaning                                                                              |
+| -------------------------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| Project -> WorkOrder                   | 1 to 0..\*    | A project may have multiple work orders.                                             |
+| WorkOrder -> WorkOrderRevision         | 1 to 1..\*    | Preserve approved original scope versions.                                           |
+| WorkOrderRevision -> ChangeEvent       | 1 to 0..\*    | Each report references the original scope it compared against.                       |
+| ChangeEvent -> ChangeOrder             | 1 to 0..1     | A report can produce one proposal in the MVP.                                        |
+| ChangeOrder -> ChangeOrderRevision     | 1 to 1..\*    | Preserve proposed terms as separate revisions.                                       |
+| ChangeOrderRevision -> ApprovalRequest | 1 to 0..\*    | Reissues create new requests; enforce one pending request for the designated client. |
+| ApprovalRequest -> ApprovalDecision    | 1 to 0..1     | A pending request has no final decision; a resolved request has one.                 |
+| ApprovalDecision -> WorkAuthorization  | 0..1 to 0..\* | Authorization history may reference a decision; the initial hold has no decision.    |
+| OutboxEvent -> Notification            | 1 to 0..\*    | One committed event may alert multiple recipients.                                   |
+| Notification -> NotificationDelivery   | 1 to 0..\*    | Deliver one recipient alert to multiple devices/channels.                            |
+
+ApprovalDecision -> OutboxEvent is a dependency: the approval service appends an event in the same transaction as the decision. It does not mean notifications determine approval status. Editable UML source is included as core-associations-source.md in the design package.
 
 ### 7.3 Integrity and indexes
 
