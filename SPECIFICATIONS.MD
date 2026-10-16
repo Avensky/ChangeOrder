@@ -533,10 +533,6 @@ Select the identity/hosting/SMS/email/AI providers; confirm notification consent
 
 ### 17.3 References
 
-- User-provided Pasted text.txt: full Mountain Lion Detection System specification used as the structural template.
-- User-provided AWS.png and UML-PROJECT1.png: reference alert workflow and class-model structure.
-- Prior Change Order UML and architecture design prepared in this conversation.
-- Group template URL (not retrievable; exact contents supplied by user as Pasted text.txt): https://github.com/salkhaliefah/CS250-F26-Group04/blob/main/SoftwareDesignSpecification.md
 - Expo push delivery, tickets, receipts and retries: https://docs.expo.dev/push-notifications/sending-notifications/
 - Expo setup and credentials: https://docs.expo.dev/push-notifications/push-notifications-setup/
 - FastAPI WebSockets: https://fastapi.tiangolo.com/advanced/websockets/
