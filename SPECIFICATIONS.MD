@@ -59,7 +59,7 @@ Users authenticate through an OIDC provider. Local CompanyMembership records def
 
 Use a modular monolith: one backend codebase with independently running API and worker processes. Keep mobile, client web, and backend directories separate. The mobile application does not connect to PostgreSQL or call AI/push providers with backend credentials.
 
-![User and notification architecture](change-order-architecture.png)
+![User and notification architecture](assets/change-order-architecture.png)
 
 ```mermaid
 flowchart TB
@@ -117,7 +117,7 @@ REST carries commands and authoritative reads. WebSocket messages are change hin
 
 ### 2.3 Notifications and approvals
 
-![Report, review, notification and approval flow](change-order-notifications-flow.png)
+![Report, review, notification and approval flow](assets/change-order-notifications-flow.png)
 
 ```mermaid
 flowchart TB
@@ -184,7 +184,7 @@ An in-app inbox entry is retained even if push permission is denied or no device
 
 ### 2.4 UML
 
-![Core Change Order class relationships](change-order-uml.png)
+![Core Change Order class relationships](assets/change-order-uml.png)
 
 The model replaces the reference project's sensors/ranger classification with contractor reports, office review, and explicit client decisions. Domain entities retain records; application services perform authorized mutations. There is no User.password field in this model because credentials are handled by the selected identity provider.
 
@@ -298,11 +298,11 @@ Every tenant-owned record includes companyId and timestamps even when omitted fr
 
 The associations are split into three compact views so they fit in both Markdown and PDF. Read 0..1 as zero or one, 0.._ as zero or more, and 1.._ as one or more. A diamond marks composition; a dashed arrow marks an application dependency.
 
-![Original scope and reporting associations](core-associations-scope.png)
+![Original scope and reporting associations](assets/core-associations-scope.png)
 
-![Revision and approval associations](core-associations-approvals.png)
+![Revision and approval associations](assets/core-associations-approvals.png)
 
-![Notification delivery associations](core-associations-notifications.png)
+![Notification delivery associations](assets/core-associations-notifications.png)
 
 | Association                            | Cardinality   | Meaning                                                                              |
 | -------------------------------------- | ------------- | ------------------------------------------------------------------------------------ |
