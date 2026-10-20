@@ -1,0 +1,16 @@
+{
+  "name": "change-order",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "install": "node scripts/install.mjs",
+    "dev": "concurrently --kill-others --handle-input --default-input-target 1 --names API,EXPO \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "node scripts/backend.mjs",
+    "dev:frontend": "npm --prefix frontend start -- --lan",
+    "typecheck": "npm --prefix frontend run typecheck",
+    "lint": "npm --prefix frontend run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

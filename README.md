@@ -17,6 +17,33 @@ Proposed design: Expo/React Native + FastAPI + PostgreSQL
 
 This document turns the agreed first pipeline into an implementation model: field report -> office review -> client decision -> contractor authorization.
 
+## Installation
+
+- **packages**
+- node v24.18.0
+- npm 11.16.0
+- Python 3.12.10
+
+```powershell
+cd backend
+
+py -3.12 -m venv .venv
+
+.\.venv\Scripts\python.exe -m pip install "fastapi[standard]"
+
+C:\Users\uriel\Projects\ChangeOrder\backend\.venv\Scripts\python.exe -m pip install --upgrade pip
+
+.\.venv\Scripts\python.exe -m pip install "fastapi[standard]"
+
+ipconfig your_pc_ip
+
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+
+```
+
+http://YOUR_PC_IP:8000/health
+
 ## 1. Boundaries and conventions
 
 - **Mobile:** screens, evidence capture, authenticated REST calls, device registration, notification taps, live status updates.
