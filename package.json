@@ -12,5 +12,9 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
+  },
+  "dependencies": {
+    "ls": "^1.0.0",
+    "scripts": "^0.1.0"
   }
 }
