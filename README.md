@@ -48,11 +48,11 @@ If you already have the project, open its existing folder instead. Run the remai
 The installer expects `backend/.env.example` and `frontend/.env.example`. Some checkouts currently contain `env.example` without the leading dot. Run this once to supply the expected filenames when needed:
 
 ```powershell
-if (!(Test-Path backend\.env.example)) {
-    Copy-Item backend\env.example backend\.env.example
+if (!(Test-Path backend\.env)) {
+    Copy-Item backend\env.example backend\.env
 }
-if (!(Test-Path frontend\.env.example)) {
-    Copy-Item frontend\env.example frontend\.env.example
+if (!(Test-Path frontend\.env)) {
+    Copy-Item frontend\env.example frontend\.env
 }
 ```
 

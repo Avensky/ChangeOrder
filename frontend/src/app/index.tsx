@@ -1,34 +1,12 @@
-import * as Device from 'expo-device';
 import { useState } from 'react';
-import { Button, Platform, ScrollView, StyleSheet } from 'react-native';
+import { Button, KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { ChangeOrderForm } from '@/features/change-orders/change-order-form';
 import { API_URL, checkBackendHealth } from '@/lib/api';
-
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
 
 export default function HomeScreen() {
   const [status, setStatus] = useState('Not checked');
@@ -50,43 +28,28 @@ export default function HomeScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-          <ThemedView style={styles.heroSection}>
-            <AnimatedIcon />
-            <ThemedText type="title" style={styles.title}>
-              Welcome to&nbsp;Expo
-            </ThemedText>
-          </ThemedView>
+        <KeyboardAvoidingView style={styles.scroll} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+            <ThemedView style={styles.heroSection}>
+              <ThemedText type="title" style={styles.title}>
+                Change Order
+              </ThemedText>
+            </ThemedView>
 
-          <ThemedView type="backgroundElement" style={styles.stepContainer}>
-            <ThemedText type="smallBold">Backend connection</ThemedText>
-            <ThemedText type="code">{API_URL ?? 'Configure frontend/.env'}</ThemedText>
-            <Button
-              title={loading ? 'Checking...' : 'Check backend'}
-              onPress={checkBackend}
-              disabled={loading}
-            />
-            <ThemedText>{status}</ThemedText>
-          </ThemedView>
+            <ChangeOrderForm />
 
-          <ThemedText type="code" style={styles.code}>
-            get started
-          </ThemedText>
-
-          <ThemedView type="backgroundElement" style={styles.stepContainer}>
-            <HintRow
-              title="Try editing"
-              hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-            />
-            <HintRow title="Dev tools" hint={getDevMenuHint()} />
-            <HintRow
-              title="Fresh start"
-              hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-            />
-          </ThemedView>
-
-          {Platform.OS === 'web' && <WebBadge />}
-        </ScrollView>
+            <ThemedView type="backgroundElement" style={styles.stepContainer}>
+              <ThemedText type="smallBold">Backend connection</ThemedText>
+              <ThemedText type="code">{API_URL ?? 'Configure frontend/.env'}</ThemedText>
+              <Button
+                title={loading ? 'Checking...' : 'Check backend'}
+                onPress={checkBackend}
+                disabled={loading}
+              />
+              <ThemedText>{status}</ThemedText>
+            </ThemedView>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </ThemedView>
   );
@@ -108,7 +71,6 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   content: {
-    flexGrow: 1,
     alignItems: 'center',
     gap: Spacing.three,
     paddingBottom: BottomTabInset + Spacing.three,
@@ -116,15 +78,14 @@ const styles = StyleSheet.create({
   heroSection: {
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
+    paddingVertical: Spacing.four,
     paddingHorizontal: Spacing.four,
     gap: Spacing.four,
   },
   title: {
     textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
+    fontSize: 36,
+    lineHeight: 44,
   },
   stepContainer: {
     gap: Spacing.three,
