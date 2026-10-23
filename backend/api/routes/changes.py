@@ -1,6 +1,9 @@
 from fastapi import APIRouter, Form, UploadFile, File, HTTPException
 from schemas.changes import ChangeOut, Severity
 from services import store
+from pathlib import Path
+from uuid import uuid4
+    
 
 router = APIRouter(prefix="/api/v1", tags=["changes"])
 
@@ -10,8 +13,25 @@ async def submit_change(
     severity: Severity = Form(Severity.normal),
     photo: UploadFile = File(...),
 ):
-    await photo.read()  # swap for Supabase upload later
-    return store.create_change(description, severity, photo.filename)
+    if photo.content_type == "image/jpeg":
+        extension = ".jpg"
+    elif photo.content_type == "image/png":
+        extension = ".png"
+    else:
+        raise HTTPException(status_code=400, detail="Upload a JPEG or PNG image")
+
+    image_bytes = await photo.read()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="The photo is empty")
+
+    uploads_dir = Path(__file__).resolve().parents[2] / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{uuid4().hex}{extension}"
+    (uploads_dir / filename).write_bytes(image_bytes)
+
+    photo_key = f"uploads/{filename}"
+    return store.create_change(description, severity, photo_key)
 
 @router.get("/changes", response_model=list[ChangeOut])
 def list_changes(status: str | None = None):
