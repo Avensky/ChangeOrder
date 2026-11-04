@@ -1,2 +1,3 @@
 fastapi[standard]==0.156.1
 python-multipart
+sqlmodel>=0.0.24,<0.1
