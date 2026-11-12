@@ -2,7 +2,6 @@ import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
-  ArrowRight,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -16,7 +15,14 @@ import { useState } from "react";
 import { Modal, Pressable, Text, TextInput, View } from "react-native";
 
 import { useWorkspace } from "./context";
-import { getProject, money, shortDate } from "./data";
+import {
+  type WorkspaceChange,
+  getProject,
+  money,
+  roles,
+  shortDate,
+  visibleHistory,
+} from "./data";
 import { AppShell, go } from "./shell";
 import {
   Avatar,
@@ -31,30 +37,38 @@ import {
 
 export function ChangeDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { changes, role, setRole, review, decide } = useWorkspace();
+  const { changes, role } = useWorkspace();
   const change = changes.find((item) => item.id === id);
-  const [amount, setAmount] = useState(String(change?.amount ?? 0));
-  const [days, setDays] = useState(String(change?.impactDays ?? 0));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [confirmation, setConfirmation] = useState<
-    "approve" | "decline" | null
-  >(null);
-  const [expanded, setExpanded] = useState(false);
   if (!change)
     return (
       <AppShell title="Request details">
         <Card>
           <EmptyState
-            title="Request not found"
-            description="This workspace may have been reset. Return to requests to choose another change."
+            title="Request unavailable in this view"
+            description="Return to your request list to choose a change available to this role."
             onAction={() => go("/requests")}
             action="View requests"
           />
         </Card>
       </AppShell>
     );
+  return <ChangeDetail key={`${role}:${change.id}`} change={change} />;
+}
+
+function ChangeDetail({ change }: { change: WorkspaceChange }) {
+  const { role, review, decide } = useWorkspace();
+  const [amount, setAmount] = useState(String(change.amount));
+  const [days, setDays] = useState(String(change.impactDays));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [confirmation, setConfirmation] = useState<
+    "approve" | "decline" | null
+  >(null);
+  const [expanded, setExpanded] = useState(false);
   const project = getProject(change.projectId);
+  const isApprover = role === "approver";
+  const showTerms = role !== "subcontractor" && change.status !== "submitted";
+  const history = visibleHistory(role, change);
   const stage =
     change.status === "submitted"
       ? 0
@@ -63,7 +77,7 @@ export function ChangeDetailScreen() {
         : 2;
 
   async function sendForReview() {
-    if (busy || !change) return;
+    if (busy) return;
     const cost = Number(amount),
       impact = Number(days);
     if (
@@ -91,7 +105,7 @@ export function ChangeDetailScreen() {
   }
 
   async function decideChange() {
-    if (busy || !change || !confirmation) return;
+    if (busy || !confirmation) return;
     setBusy(true);
     setError("");
     try {
@@ -110,14 +124,16 @@ export function ChangeDetailScreen() {
   }
 
   return (
-    <AppShell title="Request details">
+    <AppShell title={isApprover ? "Proposal details" : "Request details"}>
       <Pressable
         accessibilityRole="button"
         onPress={() => go("/requests")}
         className="mb-5 flex-row items-center gap-2 self-start py-1"
       >
         <ArrowLeft size={14} color="#74827C" />
-        <Text className="text-[11px] text-muted">Back to change requests</Text>
+        <Text className="text-[11px] text-muted">
+          {isApprover ? "Back to approval queue" : "Back to requests"}
+        </Text>
       </Pressable>
       <View className="mb-6 flex-row flex-wrap items-start justify-between gap-4">
         <View className="flex-1 gap-2">
@@ -141,44 +157,46 @@ export function ChangeDetailScreen() {
         </View>
         <StatusBadge status={change.status} />
       </View>
-      <View className="mb-6 flex-row items-center rounded-2xl border border-line bg-white p-4">
-        {[
-          "Submitted",
-          "Office review",
-          change.severity === "high"
-            ? "Office approval"
-            : change.status === "rejected"
-              ? "Declined"
-              : "Client decision",
-        ].map((label, i) => (
-          <View key={label} className="flex-1 flex-row items-center gap-2">
-            <View
-              className={`h-6 w-6 items-center justify-center rounded-full ${i <= stage ? "bg-forest" : "bg-canvas"}`}
-            >
-              {i < stage ? (
-                <Check size={12} color="white" />
-              ) : (
-                <Text
-                  className={`text-[10px] font-semibold ${i <= stage ? "text-white" : "text-muted"}`}
-                >
-                  {i + 1}
-                </Text>
-              )}
+      {!isApprover && (
+        <View className="mb-6 flex-row items-center rounded-2xl border border-line bg-white p-4">
+          {[
+            "Submitted",
+            "Office review",
+            change.severity === "high"
+              ? "Office approval"
+              : change.status === "rejected"
+                ? "Declined"
+                : "Approver decision",
+          ].map((label, i) => (
+            <View key={label} className="flex-1 flex-row items-center gap-2">
+              <View
+                className={`h-6 w-6 items-center justify-center rounded-full ${i <= stage ? "bg-forest" : "bg-canvas"}`}
+              >
+                {i < stage ? (
+                  <Check size={12} color="white" />
+                ) : (
+                  <Text
+                    className={`text-[10px] font-semibold ${i <= stage ? "text-white" : "text-muted"}`}
+                  >
+                    {i + 1}
+                  </Text>
+                )}
+              </View>
+              <Text
+                className={`flex-1 text-[10px] ${i <= stage ? "font-semibold text-ink" : "text-muted"}`}
+              >
+                {label}
+              </Text>
+              {i < 2 && <ChevronRight size={12} color="#C3CDC2" />}
             </View>
-            <Text
-              className={`flex-1 text-[10px] ${i <= stage ? "font-semibold text-ink" : "text-muted"}`}
-            >
-              {label}
-            </Text>
-            {i < 2 && <ChevronRight size={12} color="#C3CDC2" />}
-          </View>
-        ))}
-      </View>
+          ))}
+        </View>
+      )}
 
-      <View className="flex-col gap-5 lg:flex-row">
+      <View className={`gap-5 lg:flex-row ${isApprover ? "flex-col-reverse" : "flex-col"}`}>
         <View className="min-w-0 flex-1 gap-5">
           <Card className="p-5 lg:p-6">
-            <SectionTitle title="The requested change" />
+            <SectionTitle title={role === "subcontractor" ? "My site report" : "Requested work"} />
             <View className="mb-5 flex-row items-center justify-between">
               <View className="flex-row items-center gap-2.5">
                 <Avatar name={change.author} size={34} />
@@ -187,7 +205,7 @@ export function ChangeDetailScreen() {
                     {change.author}
                   </Text>
                   <Text className="mt-1 text-[10px] text-muted">
-                    Field contractor
+                    {roles[change.submittedBy].label}
                   </Text>
                 </View>
               </View>
@@ -202,7 +220,9 @@ export function ChangeDetailScreen() {
               <Text className="text-[11px] font-semibold text-ink">
                 Site attachment
               </Text>
-              <Text className="ml-auto text-[10px] text-muted">1 image</Text>
+              <Text className="ml-auto text-[10px] text-muted">
+                {change.photoUri ? "1 image" : "Demo illustration"}
+              </Text>
             </View>
             <View className="relative mt-4 overflow-hidden rounded-xl border border-line bg-canvas">
               {change.photoUri ? (
@@ -245,16 +265,16 @@ export function ChangeDetailScreen() {
           </Card>
 
           <Card className="p-5 lg:p-6">
-            <SectionTitle title="Request timeline" />
-            {change.history.map((event, i) => (
+            <SectionTitle title={isApprover ? "Decision history" : "Request timeline"} />
+            {history.map((event, i) => (
               <View key={event.id} className="flex-row gap-3">
                 <View className="items-center">
                   <View
-                    className={`h-7 w-7 items-center justify-center rounded-full ${i === change.history.length - 1 ? "bg-mint" : "bg-canvas"}`}
+                    className={`h-7 w-7 items-center justify-center rounded-full ${i === history.length - 1 ? "bg-mint" : "bg-canvas"}`}
                   >
                     <Check size={12} color="#638572" />
                   </View>
-                  {i < change.history.length - 1 && (
+                  {i < history.length - 1 && (
                     <View className="my-1 w-px flex-1 bg-line" />
                   )}
                 </View>
@@ -273,25 +293,27 @@ export function ChangeDetailScreen() {
 
         <View className="w-full gap-5 lg:w-[310px]">
           <Card className="p-5">
-            <SectionTitle title="Change summary" />
-            <View className="mb-5 rounded-xl bg-canvas p-4">
-              <Text className="text-[10px] text-muted">
-                {change.status === "approved"
-                  ? "Approved change value"
-                  : "Proposed change value"}
-              </Text>
-              <Text className="mt-2 text-[31px] font-semibold tracking-[-1px] text-ink">
-                {change.amount ? money(change.amount) : "To estimate"}
-              </Text>
-              <View className="mt-3 flex-row items-center gap-1.5">
-                <CalendarDays size={12} color="#74827C" />
+            <SectionTitle title={isApprover ? "Proposal terms" : "Project details"} />
+            {showTerms && (
+              <View className="mb-5 rounded-xl bg-canvas p-4">
                 <Text className="text-[10px] text-muted">
-                  {change.impactDays
-                    ? "+" + change.impactDays + " day schedule impact"
-                    : "No schedule extension"}
+                  {change.status === "approved"
+                    ? "Approved change value"
+                    : "Proposed change value"}
                 </Text>
+                <Text className="mt-2 text-[31px] font-semibold tracking-[-1px] text-ink">
+                  {money(change.amount)}
+                </Text>
+                <View className="mt-3 flex-row items-center gap-1.5">
+                  <CalendarDays size={12} color="#74827C" />
+                  <Text className="text-[10px] text-muted">
+                    {change.impactDays
+                      ? `+${change.impactDays} ${change.impactDays === 1 ? "day" : "days"}`
+                      : "No schedule extension"}
+                  </Text>
+                </View>
               </View>
-            </View>
+            )}
             <Text className="mb-1 text-[10px] text-muted">Project</Text>
             <Text className="text-[12px] font-semibold text-ink">
               {project.name}
@@ -299,19 +321,23 @@ export function ChangeDetailScreen() {
             <Text className="mt-1 text-[10px] leading-4 text-muted">
               {project.address}
             </Text>
-            <View className="my-4 h-px bg-line" />
-            <Text className="mb-2 text-[10px] text-muted">Client / owner</Text>
-            <View className="flex-row items-center gap-2">
-              <Avatar name={project.client} size={26} />
-              <Text className="text-[11px] text-ink">{project.client}</Text>
-            </View>
+            {role !== "subcontractor" && !isApprover && (
+              <>
+                <View className="my-4 h-px bg-line" />
+                <Text className="mb-2 text-[10px] text-muted">Project contact</Text>
+                <View className="flex-row items-center gap-2">
+                  <Avatar name={project.client} size={26} />
+                  <Text className="text-[11px] text-ink">{project.client}</Text>
+                </View>
+              </>
+            )}
           </Card>
 
           <Card className="border-[#CEDFCB] p-5">
             {role === "office" && change.status === "submitted" ? (
               <>
                 <Text className="text-[15px] font-semibold text-ink">
-                  Ready for your review
+                  Prepare the proposal
                 </Text>
                 <Text className="mb-4 mt-2 text-[11px] leading-[18px] text-muted">
                   Add a proposed cost and schedule impact before moving this
@@ -346,20 +372,19 @@ export function ChangeDetailScreen() {
                 <Button onPress={sendForReview} busy={busy} icon={Send}>
                   {change.severity === "high"
                     ? "Approve urgent change"
-                    : "Send for client approval"}
+                    : "Send for approval"}
                 </Button>
               </>
-            ) : role === "client" && change.status === "awaiting_client" ? (
+            ) : isApprover && change.status === "awaiting_client" ? (
               <>
                 <View className="mb-3 h-10 w-10 items-center justify-center rounded-xl bg-mint">
                   <CheckCircle2 size={20} color="#23664D" />
                 </View>
                 <Text className="text-[16px] font-semibold text-ink">
-                  Your decision keeps it moving.
+                  Record your decision
                 </Text>
                 <Text className="mb-5 mt-2 text-[11px] leading-[18px] text-muted">
-                  Review the description, photo, and proposed cost. Approve when
-                  you’re ready, or decline the change.
+                  Review the requested work, proposed cost, and schedule impact.
                 </Text>
                 <View className="gap-2">
                   <Button
@@ -397,25 +422,14 @@ export function ChangeDetailScreen() {
               <>
                 <Text className="text-[15px] font-semibold text-ink">
                   {change.status === "submitted"
-                    ? "Next up: office review"
-                    : "Waiting on client approval"}
+                    ? "Waiting for office review"
+                    : "Waiting for a decision"}
                 </Text>
                 <Text className="mb-4 mt-2 text-[11px] leading-[18px] text-muted">
                   {change.status === "submitted"
-                    ? "The office will review the request and prepare it for a decision."
-                    : "The office has reviewed this change. It’s ready for the client."}
+                    ? "The Office Manager will review the site report and prepare the terms."
+                    : "The proposal has been sent to the Approver."}
                 </Text>
-                <Button
-                  variant="secondary"
-                  icon={ArrowRight}
-                  onPress={() =>
-                    setRole(change.status === "submitted" ? "office" : "client")
-                  }
-                >
-                  {change.status === "submitted"
-                    ? "Preview office view"
-                    : "Preview client view"}
-                </Button>
               </>
             )}
             {!!error && (
@@ -446,8 +460,7 @@ export function ChangeDetailScreen() {
                 : "Decline this change?"}
             </Text>
             <Text className="mb-5 mt-3 text-[13px] leading-6 text-muted">
-              {change.title}
-              {change.amount ? " · " + money(change.amount) : ""}. Your decision
+              {change.title} · {money(change.amount)}. Your decision
               will be added to the request timeline.
             </Text>
             <View className="gap-2">

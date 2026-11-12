@@ -1,6 +1,7 @@
 import type { ChangeOrder, Severity } from "@/features/change-orders/types";
 
-export type Role = "field" | "office" | "client";
+export type Role = "contractor" | "subcontractor" | "office" | "approver";
+export type SubmitterRole = Extract<Role, "contractor" | "subcontractor">;
 export type Mode = "demo" | "connected";
 export type ChangeStatus = ChangeOrder["status"];
 export type Project = {
@@ -32,6 +33,8 @@ export type WorkspaceChange = {
   amount: number;
   impactDays: number;
   author: string;
+  submittedBy: SubmitterRole;
+  sentForApproval: boolean;
   createdAt: string;
   source: Mode;
   photoUri?: string;
@@ -42,25 +45,52 @@ export const roles: Record<
   Role,
   { label: string; person: string; initials: string; caption: string }
 > = {
-  field: {
-    label: "Field contractor",
+  contractor: {
+    label: "Contractor",
     person: "Uriel Zacarias",
     initials: "UZ",
-    caption: "Capture & submit",
+    caption: "Coordinate changes across projects",
+  },
+  subcontractor: {
+    label: "Subcontractor",
+    person: "Marcus Rivera",
+    initials: "MR",
+    caption: "Report site changes and track submissions",
   },
   office: {
-    label: "Office coordinator",
+    label: "Office Manager",
     person: "Avery Morgan",
     initials: "AM",
-    caption: "Review & coordinate",
+    caption: "Review requests and prepare terms",
   },
-  client: {
-    label: "Client / owner",
+  approver: {
+    label: "Approver",
     person: "Jordan Ellis",
     initials: "JE",
-    caption: "Approve & keep moving",
+    caption: "Review terms and record decisions",
   },
 };
+
+export function isSubmitterRole(role: Role): role is SubmitterRole {
+  return role === "contractor" || role === "subcontractor";
+}
+
+export function canViewChange(role: Role, change: WorkspaceChange) {
+  if (role === "subcontractor") return change.submittedBy === role;
+  if (role === "approver") return change.sentForApproval;
+  return true;
+}
+
+export function visibleHistory(role: Role, change: WorkspaceChange) {
+  return role === "approver"
+    ? change.history.filter(
+        (event) =>
+          event.kind === "awaiting_client" ||
+          event.kind === "approved" ||
+          event.kind === "rejected",
+      )
+    : change.history;
+}
 
 export const projects: Project[] = [
   {
@@ -204,12 +234,17 @@ export function seedChanges(): WorkspaceChange[] {
     ) => {
       const id = "demo-" + number;
       const time = `2026-10-${String(22 - Math.floor(i / 2)).padStart(2, "0")}T${String(16 - i).padStart(2, "0")}:20:00-07:00`;
+      const submittedBy = i % 2 ? "subcontractor" : "contractor";
+      const sentForApproval =
+        status === "awaiting_client" ||
+        status === "rejected" ||
+        (status === "approved" && severity === "normal");
       const history: Event[] = [
         {
           id: id + "-submitted",
           changeId: id,
           title: "Change request submitted",
-          person: i % 2 ? "Marcus Rivera" : "Uriel Zacarias",
+          person: roles[submittedBy].person,
           time,
           kind: "submitted",
         },
@@ -218,20 +253,19 @@ export function seedChanges(): WorkspaceChange[] {
         history.push({
           id: id + "-review",
           changeId: id,
-          title:
-            status === "awaiting_client"
-              ? "Sent to client for approval"
-              : "Office review completed",
-          person: "Avery Morgan",
+          title: sentForApproval
+            ? "Sent to approver"
+            : "Office review completed",
+          person: roles.office.person,
           time,
-          kind: "review",
+          kind: sentForApproval ? "awaiting_client" : "review",
         });
       if (status === "approved" || status === "rejected")
         history.push({
           id: id + "-decision",
           changeId: id,
           title: status === "approved" ? "Change approved" : "Change declined",
-          person: severity === "high" ? "Avery Morgan" : "Jordan Ellis",
+          person: roles[sentForApproval ? "approver" : "office"].person,
           time,
           kind: status,
         });
@@ -246,6 +280,8 @@ export function seedChanges(): WorkspaceChange[] {
         amount,
         impactDays,
         author: history[0].person,
+        submittedBy,
+        sentForApproval,
         createdAt: time,
         source: "demo",
         history,
@@ -258,7 +294,8 @@ export const money = (value: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
   }).format(value);
 export const shortDate = (value: string) =>
   new Intl.DateTimeFormat("en-US", {
