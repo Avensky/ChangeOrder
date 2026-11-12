@@ -3,9 +3,6 @@ from typing import Annotated
 from fastapi import APIRouter, Form, UploadFile, File, HTTPException
 from schemas.changes import ChangeOut, Description, Severity, Status
 from services import store
-from pathlib import Path
-from uuid import uuid4
-    
 from services.photos import save_photo
 
 router = APIRouter(prefix="/api/v1", tags=["changes"])
@@ -18,24 +15,6 @@ async def submit_change(
     severity: Severity = Form(Severity.normal),
     photo: UploadFile = File(...),
 ):
-    if photo.content_type == "image/jpeg":
-        extension = ".jpg"
-    elif photo.content_type == "image/png":
-        extension = ".png"
-    else:
-        raise HTTPException(status_code=400, detail="Upload a JPEG or PNG image")
-
-    image_bytes = await photo.read()
-    if not image_bytes:
-        raise HTTPException(status_code=400, detail="The photo is empty")
-
-    uploads_dir = Path(__file__).resolve().parents[2] / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-
-    filename = f"{uuid4().hex}{extension}"
-    (uploads_dir / filename).write_bytes(image_bytes)
-
-    photo_key = f"uploads/{filename}"
     # CHANGED: Previously photo.read() discarded the upload. Save the bytes
     # first, then attach the generated storage key to the change record.
     # Validation failures create neither a change nor an office notification.
