@@ -36,7 +36,7 @@ import {
 import type { Severity } from "./types";
 
 export function ChangeOrderForm() {
-  const { create, mode, setMode } = useWorkspace();
+  const { create, mode, role, setMode } = useWorkspace();
   const [projectId, setProjectId] = useState(projects[0].id);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -130,12 +130,13 @@ export function ChangeOrderForm() {
         <Text className="text-[11px] text-muted">Back to requests</Text>
       </Pressable>
       <PageHeading
-        eyebrow="CAPTURE IT WHILE IT'S FRESH"
-        title="A change starts here."
-        description="One photo. A few details. Your office can take it from here."
+        title={
+          role === "subcontractor" ? "Report a site change" : "New project request"
+        }
+        description="Describe the change and attach a site photo for the Office Manager."
       />
       <View className="mb-6 flex-row items-center gap-3 px-1">
-        {["Capture the change", "Office review", "Client approval"].map(
+        {["Capture the change", "Office review", "Decision"].map(
           (step, i) => (
             <View key={step} className="flex-1 flex-row items-center gap-2">
               <View

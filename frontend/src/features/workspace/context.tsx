@@ -11,8 +11,11 @@ import {
   type Mode,
   type Role,
   type WorkspaceChange,
+  canViewChange,
+  isSubmitterRole,
   roles,
   seedChanges,
+  visibleHistory,
 } from "./data";
 
 type NewChange = {
@@ -42,10 +45,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role>("office");
   const [mode, setMode] = useState<Mode>("demo");
   const [changes, setChanges] = useState(seedChanges);
-  const [unread, setUnread] = useState(3);
-  const events = changes
-    .flatMap((change) => change.history)
+  const [readEvents, setReadEvents] = useState<
+    Partial<Record<Role, Set<string>>>
+  >({});
+  const visibleChanges = changes.filter((change) => canViewChange(role, change));
+  const events = visibleChanges
+    .flatMap((change) => visibleHistory(role, change))
     .sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
+  const unread = events.filter((event) => !readEvents[role]?.has(event.id)).length;
 
   function update(
     id: string,
@@ -54,7 +61,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     extras: Partial<WorkspaceChange> = {},
   ) {
     const event: Event = {
-      id: "event-" + Date.now(),
+      id: `${id}-${status}`,
       changeId: id,
       title,
       person: roles[role].person,
@@ -73,11 +80,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           : change,
       ),
     );
-    setUnread((count) => count + 1);
   }
 
   async function create(input: NewChange) {
-    // Demo submissions stay local. Connected submissions retain the working API upload.
+    if (!isSubmitterRole(role))
+      throw new Error("Switch to Contractor or Subcontractor to submit a change.");
+    // Connected mode uses the same upload contract as the existing workspace.
     const result =
       mode === "connected"
         ? await submitChange(input.description, input.severity, input.photo)
@@ -94,7 +102,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       status: result?.status ?? "submitted",
       amount: 0,
       impactDays: 0,
-      author: roles.field.person,
+      author: roles[role].person,
+      submittedBy: role,
+      sentForApproval: false,
       createdAt: time,
       source: mode,
       photoUri: result?.photo_key
@@ -105,18 +115,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           id: id + "-submitted",
           changeId: id,
           title: "Change request submitted",
-          person: roles.field.person,
+          person: roles[role].person,
           time,
           kind: "submitted",
         },
       ],
     };
     setChanges((items) => [record, ...items]);
-    setUnread((count) => count + 1);
     return record;
   }
 
   async function review(id: string, amount: number, days: number) {
+    if (role !== "office")
+      throw new Error("Switch to Office Manager to review a change.");
     const record = changes.find((change) => change.id === id);
     if (!record || record.status !== "submitted")
       throw new Error("This request has already been reviewed.");
@@ -133,15 +144,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       id,
       status,
       status === "approved"
-        ? "Urgent change approved by office"
-        : "Sent to client for approval",
-      { amount, impactDays: days },
+        ? "Urgent change approved by Office Manager"
+        : "Sent to approver",
+      { amount, impactDays: days, sentForApproval: status === "awaiting_client" },
     );
   }
 
   async function decide(id: string, approved: boolean) {
+    if (role !== "approver")
+      throw new Error("Switch to Approver to record a decision.");
     const record = changes.find((change) => change.id === id);
-    if (!record || record.status !== "awaiting_client")
+    if (!record?.sentForApproval || record.status !== "awaiting_client")
       throw new Error("This request is no longer awaiting a decision.");
     if (record.source === "connected") {
       const notices = await requestJson<{ change_id: string; msg: string }[]>(
@@ -152,7 +165,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         .at(-1)?.msg;
       const token = link ? new URL(link).searchParams.get("token") : null;
       if (!token)
-        throw new Error("The client approval link could not be found.");
+        throw new Error("The approval link could not be found.");
       await requestJson(
         "/api/v1/approval-session/" +
           (approved ? "approve" : "decline") +
@@ -164,13 +177,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     update(
       id,
       approved ? "approved" : "rejected",
-      approved ? "Change approved by client" : "Change declined by client",
+      approved ? "Change approved" : "Change declined",
     );
   }
 
   function reset() {
     setChanges(seedChanges());
-    setUnread(3);
+    setReadEvents({});
     setMode("demo");
     setRole("office");
   }
@@ -182,10 +195,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setRole,
         mode,
         setMode,
-        changes,
+        changes: visibleChanges,
         events,
         unread,
-        markRead: () => setUnread(0),
+        markRead: () =>
+          setReadEvents((current) => ({
+            ...current,
+            [role]: new Set(events.map((event) => event.id)),
+          })),
         create,
         review,
         decide,

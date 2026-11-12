@@ -210,10 +210,12 @@ export function RequestRow({
   change,
   onPress,
   compact = false,
+  showAmount = true,
 }: {
   change: WorkspaceChange;
   onPress: () => void;
   compact?: boolean;
+  showAmount?: boolean;
 }) {
   return (
     <Pressable
@@ -235,7 +237,7 @@ export function RequestRow({
           {change.code} <Text className="text-line"> / </Text>{" "}
           {getProject(change.projectId).name}
         </Text>
-        <View className="mt-1 flex-row items-center gap-3 md:hidden">
+        <View className="mt-1 flex-row flex-wrap items-center gap-2 md:hidden">
           <StatusBadge status={change.status} />
           <PriorityBadge high={change.severity === "high"} />
         </View>
@@ -249,9 +251,13 @@ export function RequestRow({
         </View>
       )}
       <View className="items-end gap-2">
-        <Text className="text-[12px] font-semibold text-ink">
-          {change.amount ? money(change.amount) : "To estimate"}
-        </Text>
+        {showAmount && (
+          <Text className="text-[12px] font-semibold text-ink">
+            {change.status === "submitted" && !change.amount
+              ? "To estimate"
+              : money(change.amount)}
+          </Text>
+        )}
         <Text className="text-[10px] text-muted">
           {shortDate(change.createdAt)}
         </Text>
