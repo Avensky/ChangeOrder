@@ -42,10 +42,13 @@ class ChangeSubmissionTests(unittest.TestCase):
             file.unlink()
 
     def submit(self, description="Move the outlet left", severity="normal", photo=PNG, mime="image/png"):
+        return self.submit_photos(description, severity, [(photo, mime)])
+
+    def submit_photos(self, description="Move the outlet left", severity="normal", photos=((PNG, "image/png"),)):
         return self.client.post(
             "/api/v1/changes",
             data={"description": description, "severity": severity},
-            files={"photo": ("same-name.png", photo, mime)},
+            files=[("photos", ("same-name.png", photo, mime)) for photo, mime in photos],
         )
 
     def test_health_has_one_definition(self):
@@ -61,7 +64,8 @@ class ChangeSubmissionTests(unittest.TestCase):
         self.assertEqual(change["description"], "Move the outlet left")
         self.assertEqual(change["severity"], "high")
         self.assertEqual(change["status"], "submitted")
-        self.assertEqual(self.client.get("/uploads/" + change["photo_key"]).content, PNG)
+        self.assertEqual(len(change["photo_keys"]), 1)
+        self.assertEqual(self.client.get("/uploads/" + change["photo_keys"][0]).content, PNG)
         self.assertEqual(self.client.get("/api/v1/changes").json(), [change])
         notices = self.client.get("/api/v1/notifications", params={"to": "admin"}).json()
         self.assertEqual([notice["change_id"] for notice in notices], [change["id"]])
@@ -69,8 +73,22 @@ class ChangeSubmissionTests(unittest.TestCase):
     def test_same_filename_does_not_overwrite_previous_photo(self):
         first = self.submit().json()
         second = self.submit().json()
-        self.assertNotEqual(first["photo_key"], second["photo_key"])
+        self.assertNotEqual(first["photo_keys"], second["photo_keys"])
         self.assertEqual(len(list(self.upload_dir.iterdir())), 2)
+
+    def test_several_photos_are_all_saved_and_returned(self):
+        response = self.submit_photos(photos=[(PNG, "image/png")] * 3)
+        self.assertEqual(response.status_code, 201)
+        keys = response.json()["photo_keys"]
+        self.assertEqual(len(set(keys)), 3)
+        for key in keys:
+            self.assertEqual(self.client.get("/uploads/" + key).content, PNG)
+        self.assertEqual(len(list(self.upload_dir.iterdir())), 3)
+
+    def test_one_invalid_photo_rejects_the_whole_submission(self):
+        response = self.submit_photos(photos=[(PNG, "image/png"), (b"not an image", "image/png")])
+        self.assertEqual(response.status_code, 415)
+        self.assertEqual(self.client.get("/api/v1/changes").json(), [])
 
     def test_invalid_form_data_creates_nothing(self):
         cases = [
@@ -85,8 +103,8 @@ class ChangeSubmissionTests(unittest.TestCase):
         for values, status in cases:
             with self.subTest(values={key: value for key, value in values.items() if key != "photo"}):
                 self.assertEqual(self.submit(**values).status_code, status)
-        missing_photo = self.client.post("/api/v1/changes", data={"description": "Move outlet"})
-        self.assertEqual(missing_photo.status_code, 422)
+        missing_photos = self.client.post("/api/v1/changes", data={"description": "Move outlet"})
+        self.assertEqual(missing_photos.status_code, 422)
         self.assertEqual(self.client.get("/api/v1/changes").json(), [])
         self.assertEqual(list(self.upload_dir.iterdir()), [])
 

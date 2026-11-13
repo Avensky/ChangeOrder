@@ -26,4 +26,4 @@ class ChangeOut(BaseModel):
     description: Description
     severity: Severity
     status: Status
-    photo_key: str | None = None
+    photo_keys: list[str] = []

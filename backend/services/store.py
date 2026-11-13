@@ -15,10 +15,10 @@ def notify(recipient: str, change_id: str, message: str):
     # it does not send an Expo push notification, email, or text message yet.
     NOTIFICATIONS.append(dict(to=recipient, change_id=change_id, msg=message))
 
-def create_change(description, severity, photo_key):
+def create_change(description, severity, photo_keys):
     cid = str(uuid.uuid4())
     CHANGES[cid] = dict(id=cid, description=description, severity=severity,
-                        status="submitted", photo_key=photo_key)
+                        status="submitted", photo_keys=photo_keys)
     # CHANGED: The office uses the existing "admin" inbox. Notify only after
     # the validated submission and its saved photo key have been recorded.
     notify("admin", cid, "New change order submitted")
