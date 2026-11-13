@@ -1,9 +1,12 @@
 """Exercise real multipart requests, file storage, and the existing workflow."""
 
 import base64
+import json
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -306,6 +309,127 @@ class ChangeSubmissionTests(unittest.TestCase):
             self.client.post("/api/v1/changes/" + change["id"] + "/authorize").status_code,
             409,
         )
+
+    def captured_email(
+        self, environment, severity="normal", authorize=False, failing=False
+    ):
+        """Act on a change with email configured and return the sent request.
+
+        Only the network call is patched, so the real templating, headers and
+        payload are exercised.
+        """
+        from unittest.mock import MagicMock
+
+        sent = {}
+
+        def fake_urlopen(request, timeout=None):
+            if failing:
+                raise urllib.error.URLError("provider unreachable")
+            sent["url"] = request.full_url
+            sent["headers"] = dict(request.headers)
+            sent["payload"] = json.loads(request.data)
+            response = MagicMock()
+            response.status = 200
+            response.__enter__ = lambda self: self
+            response.__exit__ = lambda *args: None
+            return response
+
+        change = self.submit(severity=severity).json()
+        route = "/api/v1/changes/" + change["id"]
+        with patch.dict("os.environ", environment), patch(
+            "urllib.request.urlopen", fake_urlopen
+        ):
+            if authorize:
+                response = self.client.post(route + "/authorize")
+            else:
+                response = self.client.post(
+                    route + "/review",
+                    json={"proposed_cost_cents": 123_45, "requested_timeline_days": 2},
+                )
+        return change, response, sent
+
+    def test_gc_link_is_emailed_with_the_terms(self):
+        _, response, sent = self.captured_email(
+            {
+                "EMAIL_API_KEY": "test-key",
+                "GC_EMAIL": "gc@example.com",
+                "EMAIL_FROM": "ChangeOrder <no-reply@example.com>",
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sent["payload"]["to"], ["gc@example.com"])
+        self.assertEqual(sent["payload"]["from"], "ChangeOrder <no-reply@example.com>")
+        self.assertIn("Approval needed", sent["payload"]["subject"])
+        body = sent["payload"]["text"]
+        # The email carries the real link and the estimator's terms.
+        self.assertIn("/approve?token=", body)
+        self.assertIn("USD 123.45", body)
+        self.assertIn("2 extra day(s)", body)
+        # Opening the link must not be presented as a decision.
+        self.assertIn("does not approve anything", body)
+        self.assertEqual(sent["headers"].get("Authorization"), "Bearer test-key")
+
+    def test_console_link_still_works_when_no_email_key_is_set(self):
+        change = self.submit().json()
+        with patch.dict("os.environ", {"EMAIL_API_KEY": "", "GC_EMAIL": ""}):
+            review = self.client.post(
+                "/api/v1/changes/" + change["id"] + "/review",
+                json={"proposed_cost_cents": 1000, "requested_timeline_days": 1},
+            )
+        self.assertEqual(review.status_code, 200)
+        # The notification still carries the link, so the GC can still decide.
+        decision = self.client.post(
+            "/api/v1/approval-session/approve", params={"token": self.gc_token()}
+        )
+        self.assertEqual(decision.json(), {"status": "approved"})
+
+    def test_a_failing_email_provider_does_not_block_the_decision(self):
+        change, response, _ = self.captured_email(
+            {"EMAIL_API_KEY": "test-key", "GC_EMAIL": "gc@example.com"}, failing=True
+        )
+        # The review still succeeded and the link is still usable.
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "awaiting_gc")
+        decision = self.client.post(
+            "/api/v1/approval-session/decline", params={"token": self.gc_token()}
+        )
+        self.assertEqual(decision.json(), {"status": "declined"})
+
+    def test_fast_track_sends_a_heads_up_with_no_approval_link(self):
+        _, response, sent = self.captured_email(
+            {"EMAIL_API_KEY": "test-key", "GC_EMAIL": "gc@example.com"},
+            severity="high",
+            authorize=True,
+        )
+        self.assertEqual(response.json()["status"], "authorized_to_proceed")
+        body = sent["payload"]["text"]
+        # A heads-up only: no link, and it must not read as a request to decide.
+        self.assertNotIn("/approve?token=", body)
+        self.assertIn("No approval is being", body)
+        self.assertIn("cost is not known yet", body)
+
+    def test_email_is_not_attempted_without_a_recipient(self):
+        from unittest.mock import patch
+
+        change = self.submit().json()
+        with patch.dict("os.environ", {"EMAIL_API_KEY": "test-key", "GC_EMAIL": ""}):
+            with patch("urllib.request.urlopen") as urlopen:
+                self.client.post(
+                    "/api/v1/changes/" + change["id"] + "/review",
+                    json={"proposed_cost_cents": 100, "requested_timeline_days": 0},
+                )
+        urlopen.assert_not_called()
+
+    def test_money_is_formatted_from_integer_cents(self):
+        from services.email import money
+
+        self.assertEqual(money(0), "USD 0.00")
+        self.assertEqual(money(5), "USD 0.05")
+        self.assertEqual(money(123_45), "USD 123.45")
+        self.assertEqual(money(1_000_000_00), "USD 1,000,000.00")
+        self.assertEqual(money(50_00, "CAD"), "CAD 50.00")
+        # A fast-tracked change has no estimate yet; say so rather than "0.00".
+        self.assertEqual(money(None), "not estimated yet")
 
     def test_status_filter_is_validated(self):
         self.submit()
