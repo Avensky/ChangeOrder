@@ -2,32 +2,48 @@ import { CheckCheck, ChevronRight } from "lucide-react-native";
 import { Pressable, Text, View } from "react-native";
 
 import { useWorkspace } from "./context";
-import { shortDate } from "./data";
+import { shortDate, type Role } from "./data";
 import { AppShell, openChange } from "./shell";
-import { Avatar, Button, Card, PageHeading } from "./ui";
+import { Avatar, Button, Card, EmptyState, PageHeading } from "./ui";
+
+const activityByRole: Record<Role, { title: string; description: string }> = {
+  contractor: {
+    title: "Team activity",
+    description: "Track submissions, reviews, and decisions across your projects.",
+  },
+  subcontractor: {
+    title: "My updates",
+    description: "Follow the status of changes you submitted.",
+  },
+  office: {
+    title: "Review activity",
+    description: "Follow new submissions, proposal reviews, and decisions.",
+  },
+  approver: {
+    title: "Decision activity",
+    description: "See proposals shared with you and the decisions recorded.",
+  },
+};
 
 export function ActivityScreen() {
-  const { changes, events, unread, markRead } = useWorkspace();
+  const { changes, events, role, unread, markRead } = useWorkspace();
+  const { title, description } = activityByRole[role];
   return (
-    <AppShell title="Activity">
+    <AppShell title={title}>
       <PageHeading
-        eyebrow="NOTHING LOST IN THE BACK-AND-FORTH"
-        title="Activity"
-        description="A shared record of submissions, reviews, and decisions."
+        title={title}
+        description={description}
         action={
-          <Button
-            icon={CheckCheck}
-            variant="secondary"
-            onPress={markRead}
-            disabled={!unread}
-          >
-            Mark all as read
-          </Button>
+          unread > 0 && (
+            <Button icon={CheckCheck} variant="secondary" onPress={markRead}>
+              Mark all as read
+            </Button>
+          )
         }
       />
       <View className="mb-5 flex-row items-center gap-2">
         <Text className="text-[12px] font-semibold text-ink">
-          Workspace updates
+          Updates
         </Text>
         {unread > 0 && (
           <View className="rounded-full bg-mint px-2 py-1">
@@ -36,9 +52,11 @@ export function ActivityScreen() {
             </Text>
           </View>
         )}
-        <Text className="ml-auto text-[10px] text-muted">In-app activity</Text>
       </View>
       <Card className="overflow-hidden">
+        {events.length === 0 && (
+          <EmptyState title="No activity yet" description={description} />
+        )}
         {events.map((event, i) => {
           const change = changes.find((item) => item.id === event.changeId);
           return (

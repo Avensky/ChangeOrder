@@ -20,10 +20,8 @@ app.include_router(changes.router)
 # Defining /health here as well would duplicate the same endpoint.
 app.include_router(health.router)
 
-# CHANGED: Remove the unconditional SQL startup hook. These routes currently
-# read/write services/store.py, so initializing an unused SQL database could
-# prevent startup without adding persistence. Wire that store to SQL first.
-# Change records/tokens/notifications are still temporary and reset on restart.
+# Workspace state is stored atomically in local SQLite by services/store.py.
+# The planned Supabase schema in db/models.py remains separate.
 
 # CHANGED: Create the local photo folder and expose saved files over HTTP.
 # A phone cannot display a file path from the PC, so it loads /uploads/<key>.
