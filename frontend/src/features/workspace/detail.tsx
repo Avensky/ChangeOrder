@@ -14,6 +14,9 @@ import {
 import { useState } from "react";
 import { Modal, Pressable, Text, TextInput, View } from "react-native";
 
+import { requestJson } from "@/lib/api";
+import type { Suggestion } from "@/features/change-orders/types";
+
 import { useWorkspace } from "./context";
 import {
   type WorkspaceChange,
@@ -56,7 +59,7 @@ export function ChangeDetailScreen() {
 }
 
 function ChangeDetail({ change }: { change: WorkspaceChange }) {
-  const { role, review, decide } = useWorkspace();
+  const { role, review, decide, refresh } = useWorkspace();
   const [amount, setAmount] = useState(String(change.amount));
   const [days, setDays] = useState(String(change.impactDays));
   const [busy, setBusy] = useState(false);
@@ -64,7 +67,40 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
   const [confirmation, setConfirmation] = useState<
     "approve" | "decline" | null
   >(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [originalScope, setOriginalScope] = useState("");
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(
+    change.suggestion ?? null,
+  );
+  const [suggesting, setSuggesting] = useState(false);
+  const [scope, setScope] = useState(change.description);
+  const photoUris =
+    change.photoUris ?? (change.photoUri ? [change.photoUri] : []);
+  async function suggest() {
+    setSuggesting(true);
+    setError("");
+    try {
+      const result = await requestJson<Suggestion>(
+        "/api/v1/changes/" + encodeURIComponent(change.id) + "/suggestion",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ original_scope: originalScope }),
+        },
+        60000,
+      );
+      setSuggestion(result);
+      await refresh();
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not generate a suggestion.",
+      );
+    } finally {
+      setSuggesting(false);
+    }
+  }
   const project = getProject(change.projectId);
   const isApprover = role === "approver";
   const showTerms = role !== "subcontractor" && change.status !== "submitted";
@@ -92,7 +128,7 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
     setBusy(true);
     setError("");
     try {
-      await review(change.id, cost, impact);
+      await review(change.id, cost, impact, scope);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -193,10 +229,16 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
         </View>
       )}
 
-      <View className={`gap-5 lg:flex-row ${isApprover ? "flex-col-reverse" : "flex-col"}`}>
+      <View
+        className={`gap-5 lg:flex-row ${isApprover ? "flex-col-reverse" : "flex-col"}`}
+      >
         <View className="min-w-0 flex-1 gap-5">
           <Card className="p-5 lg:p-6">
-            <SectionTitle title={role === "subcontractor" ? "My site report" : "Requested work"} />
+            <SectionTitle
+              title={
+                role === "subcontractor" ? "My site report" : "Requested work"
+              }
+            />
             <View className="mb-5 flex-row items-center justify-between">
               <View className="flex-row items-center gap-2.5">
                 <Avatar name={change.author} size={34} />
@@ -221,27 +263,31 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
                 Site attachment
               </Text>
               <Text className="ml-auto text-[10px] text-muted">
-                {change.photoUri ? "1 image" : "Demo illustration"}
+                {photoUris.length
+                  ? photoUris.length + " images"
+                  : "Demo illustration"}
               </Text>
             </View>
             <View className="relative mt-4 overflow-hidden rounded-xl border border-line bg-canvas">
-              {change.photoUri ? (
-                <>
-                  <Image
-                    source={{ uri: change.photoUri }}
-                    style={{ width: "100%", height: 300 }}
-                    contentFit="contain"
-                    accessibilityLabel="Submitted site photo"
-                  />
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Expand site photo"
-                    onPress={() => setExpanded(true)}
-                    className="absolute bottom-3 right-3 rounded-lg bg-white p-2"
-                  >
-                    <Expand size={15} color="#23664D" />
-                  </Pressable>
-                </>
+              {photoUris.length ? (
+                photoUris.map((uri, index) => (
+                  <View key={uri} className="relative">
+                    <Image
+                      source={{ uri }}
+                      style={{ width: "100%", height: 260 }}
+                      contentFit="contain"
+                      accessibilityLabel={"Submitted site photo " + (index + 1)}
+                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={"Expand site photo " + (index + 1)}
+                      onPress={() => setExpanded(uri)}
+                      className="absolute bottom-3 right-3 rounded-lg bg-white p-3"
+                    >
+                      <Expand size={18} color="#23664D" />
+                    </Pressable>
+                  </View>
+                ))
               ) : (
                 <>
                   <ProjectArt
@@ -265,7 +311,9 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
           </Card>
 
           <Card className="p-5 lg:p-6">
-            <SectionTitle title={isApprover ? "Decision history" : "Request timeline"} />
+            <SectionTitle
+              title={isApprover ? "Decision history" : "Request timeline"}
+            />
             {history.map((event, i) => (
               <View key={event.id} className="flex-row gap-3">
                 <View className="items-center">
@@ -293,7 +341,14 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
 
         <View className="w-full gap-5 lg:w-[310px]">
           <Card className="p-5">
-            <SectionTitle title={isApprover ? "Proposal terms" : "Project details"} />
+            <SectionTitle
+              title={isApprover ? "Proposal terms" : "Project details"}
+            />
+            {showTerms && !!change.approvedScope && (
+              <Text className="mb-4 text-[13px] leading-6 text-ink">
+                {change.approvedScope}
+              </Text>
+            )}
             {showTerms && (
               <View className="mb-5 rounded-xl bg-canvas p-4">
                 <Text className="text-[10px] text-muted">
@@ -324,7 +379,9 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
             {role !== "subcontractor" && !isApprover && (
               <>
                 <View className="my-4 h-px bg-line" />
-                <Text className="mb-2 text-[10px] text-muted">Project contact</Text>
+                <Text className="mb-2 text-[10px] text-muted">
+                  Project contact
+                </Text>
                 <View className="flex-row items-center gap-2">
                   <Avatar name={project.client} size={26} />
                   <Text className="text-[11px] text-ink">{project.client}</Text>
@@ -343,6 +400,77 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
                   Add a proposed cost and schedule impact before moving this
                   change forward.
                 </Text>
+                {change.source === "connected" && (
+                  <View className="mb-5 gap-3">
+                    <Text className="text-[12px] font-semibold text-ink">
+                      AI estimate assistant
+                    </Text>
+                    <Text className="text-[11px] leading-5 text-muted">
+                      Paste the approved original scope. AI compares it with
+                      this report and supported photos. Review all assumptions
+                      before using the suggestion.
+                    </Text>
+                    <TextInput
+                      accessibilityLabel="Original approved scope"
+                      value={originalScope}
+                      onChangeText={setOriginalScope}
+                      multiline
+                      maxLength={10000}
+                      placeholder="Original approved scope of work"
+                      className="min-h-[90px] rounded-xl border border-line p-3 text-ink"
+                    />
+                    <Button
+                      variant="secondary"
+                      onPress={suggest}
+                      busy={suggesting}
+                      disabled={busy || originalScope.trim().length < 10}
+                    >
+                      Generate suggestion
+                    </Button>
+                    {!!suggestion && (
+                      <View className="gap-2 rounded-xl bg-canvas p-3">
+                        <Text className="text-[12px] font-semibold text-ink">
+                          Unverified suggestion ·{" "}
+                          {suggestion.in_scope
+                            ? "Likely in scope"
+                            : "Likely extra work"}
+                        </Text>
+                        <Text className="text-[12px] text-ink">
+                          {suggestion.scope}
+                        </Text>
+                        <Text className="text-[12px] text-ink">
+                          {money(suggestion.amount)} · {suggestion.impact_days}{" "}
+                          additional days
+                        </Text>
+                        <Text className="text-[11px] leading-5 text-muted">
+                          {suggestion.rationale}
+                        </Text>
+                        <Button
+                          variant="secondary"
+                          disabled={busy}
+                          onPress={() => {
+                            setAmount(String(suggestion.amount));
+                            setDays(String(suggestion.impact_days));
+                            setScope(suggestion.scope);
+                          }}
+                        >
+                          Use suggestion for review
+                        </Button>
+                      </View>
+                    )}
+                  </View>
+                )}
+                <Text className="mb-2 text-[10px] font-semibold text-ink">
+                  Proposed work scope
+                </Text>
+                <TextInput
+                  accessibilityLabel="Proposed work scope"
+                  value={scope}
+                  onChangeText={setScope}
+                  multiline
+                  maxLength={2000}
+                  className="mb-4 min-h-[90px] rounded-xl border border-line bg-canvas p-3 text-[13px] text-ink"
+                />
                 <Text className="mb-2 text-[10px] font-semibold text-ink">
                   Proposed cost ($)
                 </Text>
@@ -414,7 +542,7 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
                 </Text>
                 <Text className="mt-2 text-[11px] leading-[18px] text-muted">
                   {change.status === "approved"
-                    ? "The field team can move forward with the approved change."
+                    ? "The project work order now includes this scope, cost, schedule impact, and photos."
                     : "This change was declined and remains in the project record."}
                 </Text>
               </>
@@ -460,8 +588,8 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
                 : "Decline this change?"}
             </Text>
             <Text className="mb-5 mt-3 text-[13px] leading-6 text-muted">
-              {change.title} · {money(change.amount)}. Your decision
-              will be added to the request timeline.
+              {change.title} · {money(change.amount)}. Your decision will be
+              added to the request timeline.
             </Text>
             <View className="gap-2">
               <Button
@@ -485,22 +613,22 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
         </View>
       </Modal>
       <Modal
-        visible={expanded}
+        visible={expanded !== null}
         transparent
         animationType="fade"
-        onRequestClose={() => setExpanded(false)}
+        onRequestClose={() => setExpanded(null)}
       >
         <View className="flex-1 items-center justify-center bg-black/90">
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close photo"
-            onPress={() => setExpanded(false)}
+            onPress={() => setExpanded(null)}
             className="absolute right-6 top-12 z-10 rounded-full bg-white/20 p-3"
           >
             <X size={20} color="white" />
           </Pressable>
           <Image
-            source={{ uri: change.photoUri }}
+            source={{ uri: expanded ?? undefined }}
             style={{ width: "100%", height: "80%" }}
             contentFit="contain"
           />

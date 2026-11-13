@@ -41,13 +41,13 @@ export function ChangeOrderForm() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState<Severity>("normal");
-  const [photo, setPhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [photos, setPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [picking, setPicking] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const submitting = useRef(false);
   const busy = picking || sending;
-  const ready = !!title.trim() && !!description.trim() && !!photo;
+  const ready = !!title.trim() && !!description.trim() && photos.length > 0;
 
   async function pickPhoto(source: "camera" | "library") {
     setError("");
@@ -64,15 +64,22 @@ export function ChangeOrderForm() {
         mediaTypes: ["images"],
         quality: 0.7,
         allowsEditing: false,
+        allowsMultipleSelection: source === "library",
+        selectionLimit: Math.max(1, 10 - photos.length),
       };
       const result = await (source === "camera"
         ? ImagePicker.launchCameraAsync(options)
         : ImagePicker.launchImageLibraryAsync(options));
       if (!result.canceled) {
-        const selected = result.assets[0];
-        if (selected.fileSize && selected.fileSize > 10 * 1024 * 1024)
-          throw new Error("Choose an image that is 10 MB or smaller.");
-        setPhoto(selected);
+        if (photos.length + result.assets.length > 10)
+          throw new Error("Attach up to 10 photos.");
+        if (
+          result.assets.some(
+            (asset) => asset.fileSize && asset.fileSize > 10 * 1024 * 1024,
+          )
+        )
+          throw new Error("Each image must be 10 MB or smaller.");
+        setPhotos((current) => [...current, ...result.assets]);
       }
     } catch (cause) {
       setError(
@@ -88,8 +95,10 @@ export function ChangeOrderForm() {
   async function send() {
     if (submitting.current) return;
     setError("");
-    if (!ready || !photo) {
-      setError("Add a title, short description, and one photo before sending.");
+    if (!ready || photos.length === 0) {
+      setError(
+        "Add a title, short description, and at least one photo before sending.",
+      );
       return;
     }
     submitting.current = true;
@@ -100,12 +109,12 @@ export function ChangeOrderForm() {
         description,
         severity,
         projectId,
-        photo,
+        photos,
       });
       setTitle("");
       setDescription("");
       setSeverity("normal");
-      setPhoto(null);
+      setPhotos([]);
       openChange(change.id);
     } catch (cause) {
       setError(
@@ -131,32 +140,32 @@ export function ChangeOrderForm() {
       </Pressable>
       <PageHeading
         title={
-          role === "subcontractor" ? "Report a site change" : "New project request"
+          role === "subcontractor"
+            ? "Report a site change"
+            : "New project request"
         }
         description="Describe the change and attach a site photo for the Office Manager."
       />
       <View className="mb-6 flex-row items-center gap-3 px-1">
-        {["Capture the change", "Office review", "Decision"].map(
-          (step, i) => (
-            <View key={step} className="flex-1 flex-row items-center gap-2">
-              <View
-                className={`h-6 w-6 items-center justify-center rounded-full ${i === 0 ? "bg-forest" : "bg-[#E6EBE3]"}`}
-              >
-                <Text
-                  className={`text-[10px] font-semibold ${i === 0 ? "text-white" : "text-muted"}`}
-                >
-                  {i + 1}
-                </Text>
-              </View>
+        {["Capture the change", "Office review", "Decision"].map((step, i) => (
+          <View key={step} className="flex-1 flex-row items-center gap-2">
+            <View
+              className={`h-6 w-6 items-center justify-center rounded-full ${i === 0 ? "bg-forest" : "bg-[#E6EBE3]"}`}
+            >
               <Text
-                className={`flex-1 text-[10px] ${i === 0 ? "font-semibold text-ink" : "text-muted"}`}
+                className={`text-[10px] font-semibold ${i === 0 ? "text-white" : "text-muted"}`}
               >
-                {step}
+                {i + 1}
               </Text>
-              {i < 2 && <ArrowRight size={12} color="#AFBDB0" />}
             </View>
-          ),
-        )}
+            <Text
+              className={`flex-1 text-[10px] ${i === 0 ? "font-semibold text-ink" : "text-muted"}`}
+            >
+              {step}
+            </Text>
+            {i < 2 && <ArrowRight size={12} color="#AFBDB0" />}
+          </View>
+        ))}
       </View>
 
       <View className="flex-col gap-5 lg:flex-row">
@@ -268,36 +277,45 @@ export function ChangeOrderForm() {
             <View>
               <View className="mb-3 flex-row items-center justify-between">
                 <Text className="text-[12px] font-semibold text-ink">
-                  Site photo <Text className="text-forest">*</Text>
+                  Site photos <Text className="text-forest">*</Text>
                 </Text>
                 <Text className="text-[10px] text-muted">
-                  One photo · up to 10 MB
+                  Up to 10 photos · 10 MB each
                 </Text>
               </View>
-              {photo ? (
-                <View className="relative mb-3 overflow-hidden rounded-xl border border-line bg-canvas">
-                  <Image
-                    source={{ uri: photo.uri }}
-                    style={{ width: "100%", height: 250 }}
-                    contentFit="contain"
-                    accessibilityLabel="Selected site photo"
-                  />
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Remove photo"
-                    disabled={busy}
-                    onPress={() => setPhoto(null)}
-                    className="absolute right-3 top-3 rounded-full bg-white p-2"
+              {photos.length > 0 ? (
+                photos.map((photo, index) => (
+                  <View
+                    key={photo.uri + index}
+                    className="relative mb-3 overflow-hidden rounded-xl border border-line bg-canvas"
                   >
-                    <X size={15} color="#23664D" />
-                  </Pressable>
-                  <View className="flex-row items-center gap-1.5 border-t border-line bg-white px-3 py-2">
-                    <CheckCircle2 size={12} color="#23664D" />
-                    <Text className="text-[10px] text-muted">
-                      Photo attached and ready
-                    </Text>
+                    <Image
+                      source={{ uri: photo.uri }}
+                      style={{ width: "100%", height: 250 }}
+                      contentFit="contain"
+                      accessibilityLabel="Selected site photo"
+                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={"Remove photo " + (index + 1)}
+                      disabled={busy}
+                      onPress={() =>
+                        setPhotos((current) =>
+                          current.filter((_, i) => i !== index),
+                        )
+                      }
+                      className="absolute right-3 top-3 rounded-full bg-white p-2"
+                    >
+                      <X size={15} color="#23664D" />
+                    </Pressable>
+                    <View className="flex-row items-center gap-1.5 border-t border-line bg-white px-3 py-2">
+                      <CheckCircle2 size={12} color="#23664D" />
+                      <Text className="text-[10px] text-muted">
+                        Photo attached and ready
+                      </Text>
+                    </View>
                   </View>
-                </View>
+                ))
               ) : (
                 <View className="mb-3 items-center gap-2 rounded-xl border border-dashed border-[#C5D5C2] bg-[#F7FAF4] px-5 py-7">
                   <View className="mb-1 h-10 w-10 items-center justify-center rounded-xl bg-[#E7EFDF]">
@@ -319,7 +337,7 @@ export function ChangeOrderForm() {
                     disabled={busy}
                     onPress={() => pickPhoto("camera")}
                   >
-                    {photo ? "Retake photo" : "Take photo"}
+                    {photos.length ? "Add camera photo" : "Take photo"}
                   </Button>
                 </View>
                 <View className="min-w-[120px] flex-1">
@@ -329,7 +347,7 @@ export function ChangeOrderForm() {
                     disabled={busy}
                     onPress={() => pickPhoto("library")}
                   >
-                    Choose photo
+                    Choose photos
                   </Button>
                 </View>
               </View>
@@ -380,7 +398,7 @@ export function ChangeOrderForm() {
               {[
                 { label: "Clear title", ready: !!title.trim() },
                 { label: "Short description", ready: !!description.trim() },
-                { label: "Site photo", ready: !!photo },
+                { label: "Site photo", ready: photos.length > 0 },
               ].map((item) => (
                 <View key={item.label} className="flex-row items-center gap-2">
                   <View

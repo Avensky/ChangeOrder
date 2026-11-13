@@ -4,7 +4,14 @@ import { Pressable, Text, View } from "react-native";
 import { useWorkspace } from "./context";
 import { isSubmitterRole, money, projects } from "./data";
 import { AppShell, go } from "./shell";
-import { Avatar, Button, Card, EmptyState, PageHeading, ProjectArt } from "./ui";
+import {
+  Avatar,
+  Button,
+  Card,
+  EmptyState,
+  PageHeading,
+  ProjectArt,
+} from "./ui";
 
 export function ProjectsScreen() {
   const { changes, role } = useWorkspace();
@@ -47,12 +54,29 @@ export function ProjectsScreen() {
       <View className="mb-6 flex-row items-center gap-2">
         <View className="h-2 w-2 rounded-full bg-forest" />
         <Text className="text-[12px] font-semibold text-ink">
-          {projects.length} {isSubcontractor ? "active sites" : "active projects"}
+          {projects.length}{" "}
+          {isSubcontractor ? "active sites" : "active projects"}
         </Text>
         <Text className="ml-auto text-[10px] text-muted">
           Sample project workspace
         </Text>
       </View>
+      {!isSubcontractor && (
+        <View className="mb-5 gap-2">
+          <Text className="text-[13px] font-semibold text-ink">
+            Project work orders
+          </Text>
+          {projects.map((project) => (
+            <Button
+              key={project.id}
+              variant="secondary"
+              onPress={() => go("/work-order?project=" + project.id)}
+            >
+              {project.name + " work order"}
+            </Button>
+          ))}
+        </View>
+      )}
       <View className="flex-row flex-wrap gap-5">
         {projects.map((project, i) => {
           const requests = changes.filter(

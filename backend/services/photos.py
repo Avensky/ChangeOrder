@@ -1,8 +1,4 @@
-"""NEW: Save prototype photos locally while keeping the existing photo_key API.
-
-This separates file handling from the HTTP route. A future storage provider
-can replace this function without changing the frontend's multipart fields.
-"""
+"""Validate and save individual attachments for multi-photo change reports."""
 
 import asyncio
 import uuid

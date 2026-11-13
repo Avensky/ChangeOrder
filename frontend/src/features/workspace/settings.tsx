@@ -89,7 +89,7 @@ export function SettingsScreen() {
                     <Text className="mt-1.5 text-[11px] leading-[18px] text-muted">
                       {value === "demo"
                         ? "Use sample projects and local requests. Reporting, review, and decisions run in this session."
-                        : "Upload new photos and descriptions to your running API. Reviews and decisions for those requests use the existing API routes."}
+                        : "Share reports, photos, estimates, and approvals through your running API. Approved changes automatically update the project work order."}
                     </Text>
                   </View>
                   {mode === value && <Check size={15} color="#23664D" />}
@@ -97,9 +97,9 @@ export function SettingsScreen() {
               ))}
             </View>
             <Text className="mt-4 text-[10px] leading-4 text-muted">
-              Project names, titles, estimates, and schedule details are
-              presentation data in both modes. They stay in this session; only
-              the existing description, priority, and photo fields are uploaded.
+              Connected mode saves project links, titles, photos, estimates, and
+              decisions on the server and refreshes this workspace
+              automatically. Demo changes stay in this session.
             </Text>
           </Card>
         </View>

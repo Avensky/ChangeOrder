@@ -31,6 +31,7 @@ export type WorkspaceChange = {
   severity: Severity;
   status: ChangeStatus;
   amount: number;
+  approvedScope?: string | null;
   impactDays: number;
   author: string;
   submittedBy: SubmitterRole;
@@ -38,6 +39,8 @@ export type WorkspaceChange = {
   createdAt: string;
   source: Mode;
   photoUri?: string;
+  photoUris?: string[];
+  suggestion?: import("@/features/change-orders/types").Suggestion | null;
   history: Event[];
 };
 

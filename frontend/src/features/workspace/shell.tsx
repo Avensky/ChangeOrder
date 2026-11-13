@@ -114,7 +114,8 @@ export function AppShell({
 }) {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
-  const { role, setRole, mode, unread, changes } = useWorkspace();
+  const { role, setRole, mode, unread, changes, syncError, refresh } =
+    useWorkspace();
   const [showRolePicker, setShowRolePicker] = useState(false);
   const [search, setSearch] = useState("");
   const profile = roles[role];
@@ -309,6 +310,26 @@ export function AppShell({
           }}
         >
           <View className="mx-auto w-full max-w-[1480px] px-5 pb-28 pt-7 lg:px-8 lg:pb-4 lg:pt-8">
+            {mode === "connected" && !!syncError && (
+              <View className="mb-4 rounded-xl bg-red-50 p-4">
+                <Text
+                  accessibilityRole="alert"
+                  className="mb-2 text-[12px] text-red-700"
+                >
+                  {syncError}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    void refresh();
+                  }}
+                >
+                  <Text className="font-semibold text-forest">
+                    Retry refresh
+                  </Text>
+                </Pressable>
+              </View>
+            )}
             {children}
           </View>
         </ScrollView>
