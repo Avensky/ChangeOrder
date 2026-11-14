@@ -111,7 +111,7 @@ export default function ApprovalLinkScreen() {
                 accessibilityLabel={"Site photo " + (index + 1)}
               />
             ))}
-            {change.status === "awaiting_client" &&
+            {["awaiting_gc", "awaiting_client"].includes(change.status) &&
               (confirmation ? (
                 <>
                   <Text className="text-[15px] font-semibold text-ink">

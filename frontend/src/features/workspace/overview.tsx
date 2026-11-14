@@ -25,7 +25,7 @@ type DashboardProps = { changes: WorkspaceChange[] };
 function ContractorDashboard({ changes }: DashboardProps) {
   const openChanges = changes.filter(
     (change) =>
-      change.status === "submitted" || change.status === "awaiting_client",
+      change.status === "submitted" || change.status === "awaiting_gc",
   );
   return (
     <>
@@ -50,7 +50,7 @@ function ContractorDashboard({ changes }: DashboardProps) {
               (change) => change.projectId === project.id,
             );
             const awaiting = open.filter(
-              (change) => change.status === "awaiting_client",
+              (change) => change.status === "awaiting_gc",
             );
             return (
               <Pressable
@@ -113,7 +113,7 @@ function SubcontractorDashboard({ changes }: DashboardProps) {
     (change) => change.status === "submitted",
   ).length;
   const awaiting = changes.filter(
-    (change) => change.status === "awaiting_client",
+    (change) => change.status === "awaiting_gc",
   ).length;
   return (
     <>
@@ -160,7 +160,7 @@ function SubcontractorDashboard({ changes }: DashboardProps) {
 
 function OfficeDashboard({ changes }: DashboardProps) {
   const intake = changes
-    .filter((change) => change.status === "submitted")
+    .filter((change) => ["submitted", "in_review", "authorized_to_proceed"].includes(change.status))
     .sort(
       (a, b) => Number(b.severity === "high") - Number(a.severity === "high"),
     );
@@ -169,16 +169,16 @@ function OfficeDashboard({ changes }: DashboardProps) {
   return (
     <>
       <PageHeading
-        title="Office intake"
+        title="Estimator review"
         description="Triage field submissions and set the proposed cost and schedule for each request."
       />
       <View className="mb-5 flex-row flex-wrap gap-3">
         <QueueCount label="Ready for review" count={intake.length} />
         <QueueCount label="High priority" count={urgent.length} />
         <QueueCount
-          label="With the approver"
+          label="With the GC"
           count={
-            changes.filter((change) => change.status === "awaiting_client")
+            changes.filter((change) => change.status === "awaiting_gc")
               .length
           }
         />
@@ -221,10 +221,10 @@ function OfficeDashboard({ changes }: DashboardProps) {
 }
 
 function ApproverDashboard({ changes }: DashboardProps) {
-  const pending = changes.filter((change) => change.status === "awaiting_client");
+  const pending = changes.filter((change) => change.status === "awaiting_gc");
   const completed = changes
     .filter(
-      (change) => change.status === "approved" || change.status === "rejected",
+      (change) => change.status === "approved" || change.status === "declined",
     )
     .sort(
       (a, b) =>
@@ -305,7 +305,19 @@ function ApproverDashboard({ changes }: DashboardProps) {
   );
 }
 
+function ManagerDashboard({ changes }: DashboardProps) {
+  const urgent = changes.filter(change => change.severity === "high" && ["submitted", "in_review"].includes(change.status));
+  return <>
+    <PageHeading title="Work authorizations" description="Authorize urgent work before estimation. The GC still decides the cost." />
+    <View className="gap-3">
+      {urgent.map(change => <RequestRow key={change.id} change={change} onPress={() => openChange(change.id)} />)}
+      {!urgent.length && <EmptyState title="No urgent work awaiting authorization" description="Open high-priority reports will appear here." />}
+    </View>
+  </>;
+}
+
 const dashboards = {
+  manager: ManagerDashboard,
   contractor: ContractorDashboard,
   subcontractor: SubcontractorDashboard,
   office: OfficeDashboard,
