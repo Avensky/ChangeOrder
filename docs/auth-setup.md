@@ -16,9 +16,13 @@ The migrations `0000`, `0001` and `0002` are already applied and the tables were
 - The **service-role key** (new name: *secret key*, `sb_secret_...`), the **database password** and the `DATABASE_URL` that contains it must **never** be committed, pasted into a PR, or put in `frontend/` (anything starting with `EXPO_PUBLIC_` is sent to every phone). They live only in each person's local `backend/.env` and in the host's secret settings.
 - The backend in this plan does not need the service-role key at all. Do not give it one.
 
+## Status of the demo project
+
+The demo Supabase project is `https://fkcxyisfffbhorzajryd.supabase.co`. Steps 1, 4 and 5 are **already done** for it: seed 0001 was run, the three staff accounts were created, and they were linked with seed 0002. Company "Cohyric Demo" has id 1, so `WORKSPACE_COMPANY_ID=1` (the default) is correct. The gc user exists and has no account. The steps stay below for reuse on another project.
+
 ## Steps
 
-### 1. Run seed 0001
+### 1. Run seed 0001 (done for the demo project)
 
 Supabase dashboard, SQL editor, paste the whole of `backend/db/seeds/0001_demo_seed.sql`, run. It is safe to run twice; the second run prints a notice and changes nothing. It stops with an error if schema v2 is not there.
 
@@ -30,7 +34,7 @@ SELECT slug, name, base_budget_cents, currency FROM project ORDER BY id;
 SELECT role, name, email, auth_user_id FROM "user" ORDER BY id;
 ```
 
-Expect one company, three projects, four users, every `auth_user_id` empty. Note the company `id`. The repository layer reads `WORKSPACE_COMPANY_ID` (default `1`); if the company id is not 1, set that variable in `backend/.env`.
+Expect one company, three projects, four users, every `auth_user_id` empty (on a fresh project; the demo project has since been linked, step 5). Note the company `id`; on the demo project it is 1. The repository layer reads `WORKSPACE_COMPANY_ID` (default `1`); if the company id is not 1, set that variable in `backend/.env`.
 
 ### 2. Enable the email sign-in provider
 
@@ -42,7 +46,7 @@ On the same Email provider settings, turn **Confirm email** off. The `.test` add
 
 Source: Supabase, Password-based Auth, https://supabase.com/docs/guides/auth/passwords (says email confirmation is on by default on hosted projects and is changed on the Auth Providers page).
 
-### 4. Create the three staff accounts
+### 4. Create the three staff accounts (done for the demo project)
 
 Dashboard, Authentication, Users, **Add user**, **Create new user**. Create exactly these three, with **Auto Confirm User** ticked:
 
@@ -56,7 +60,7 @@ Choose a password for each, share them privately with Jalen and Uriel, and do no
 
 The role is not stored in Supabase. It is the `role` column of the matching `"user"` row, found through `auth_user_id` (step 5). The server reads it from the database, so a role sent by the app is never trusted.
 
-### 5. Link the accounts to the app users
+### 5. Link the accounts to the app users (done for the demo project)
 
 SQL editor, paste `backend/db/seeds/0002_link_auth_users.sql`, run. It sets `"user".auth_user_id` from `auth.users` by email for the three staff users only. It never touches the gc user. If any account is missing it stops with an error naming the missing emails and changes nothing; fix step 4 and run it again. Running it again after success changes nothing. The check query at the end of the file should show three linked rows and the gc row empty.
 
@@ -82,10 +86,12 @@ The backend verifies the access token the app sends in `Authorization: Bearer <j
 
 Sources: https://supabase.com/docs/guides/auth/jwts and https://supabase.com/docs/guides/auth/signing-keys
 
-Check which system the project uses: Dashboard, Project Settings, **JWT Keys** (the JWT signing keys page).
+**This project uses ES256.** Its JWT Keys page lists an ECC (P-256) key as the current signing key, so access tokens are signed with ES256 and the project uses asymmetric signing. The backend therefore needs **no secret** to verify them:
 
-- If it lists an asymmetric key (ES256 or RS256) as current: use the JWKS endpoint. Nothing secret is needed.
-- If it still shows only the legacy JWT secret (HS256): either click **Migrate JWT secret** on that page (the docs say this causes no downtime) and then use the JWKS endpoint, or, as a fallback only, give the backend the legacy secret.
+- `SUPABASE_JWT_SECRET` must stay **unset**, and the legacy JWT secret must not be copied into `backend/.env`, the host's settings, a chat or anywhere else.
+- The verification keys come from the public JWKS address under the project URL: `https://fkcxyisfffbhorzajryd.supabase.co/auth/v1/.well-known/jwks.json`.
+
+Note for other projects only: a project that still shows only the legacy JWT secret (HS256) can click **Migrate JWT secret** on the JWT Keys page (the docs say no downtime) and then use JWKS as well. Giving the backend the legacy secret is a last-resort fallback, not used here.
 
 Backend variables (names only, values go in local `backend/.env` and the host's secrets):
 
@@ -93,7 +99,7 @@ Backend variables (names only, values go in local `backend/.env` and the host's 
 | --- | --- | --- |
 | `SUPABASE_URL` | the Project URL, same as the frontend one | no |
 | `SUPABASE_JWKS_URL` | optional; defaults to `$SUPABASE_URL/auth/v1/.well-known/jwks.json` | no |
-| `SUPABASE_JWT_SECRET` | only for the legacy HS256 fallback; leave unset when using JWKS | **yes, never commit** |
+| `SUPABASE_JWT_SECRET` | **leave unset** (ES256 project). Legacy HS256 projects only | **yes, never commit** |
 | `SUPABASE_JWT_AUDIENCE` | optional; Supabase user tokens carry `aud` = `authenticated` | no |
 | `DATABASE_URL` | see below | **yes, never commit** |
 
@@ -118,10 +124,13 @@ With the three accounts and the anon key, a sign-in from the app (or the dashboa
 
 **Jalen (J5, role checks on routes):**
 
-- Send `Authorization: Bearer <access token>` and verify it: signature from the JWKS (`SUPABASE_JWKS_URL`, default `$SUPABASE_URL/auth/v1/.well-known/jwks.json`), `exp` not passed, `iss` equal to `$SUPABASE_URL/auth/v1`, `aud` equal to `authenticated`. Use a JWT library; do not write the algorithm yourself.
-- **Read the user's id from the `sub` claim.** It is a UUID. Look up `"user"` where `auth_user_id = sub`; that row gives `id`, `company_id` and `role`. Reject a valid token with no matching row. Never take a role or company from the request body or from token claims you did not verify.
+- The app sends `Authorization: Bearer <access token>`. Verify it with a JWT library; do not write the algorithm yourself:
+  - **Algorithm: ES256 only.** Configure the library to accept only ES256, so `none` and HS256 are rejected.
+  - **Keys:** only the keys at the JWKS address (`SUPABASE_JWKS_URL`, default `$SUPABASE_URL/auth/v1/.well-known/jwks.json`). The dashboard may still list a previously used legacy key; the backend must not trust it, and must not be given the legacy secret.
+  - Check `exp` has not passed, `iss` equals the project URL plus `/auth/v1` (`https://fkcxyisfffbhorzajryd.supabase.co/auth/v1`), and `aud` equals `authenticated`.
+  - **Read the user's id from the `sub` claim** (a UUID), then look up `"user"` where `auth_user_id = sub`. That row gives `id`, `company_id` and `role`. Reject a valid token with no matching row. Never take a role or company from the request body or from claims you did not verify.
 - The gc user has no `auth_user_id` and must never pass this check; GC access stays on the emailed link.
-- Variables: `SUPABASE_URL`, optional `SUPABASE_JWKS_URL`, optional `SUPABASE_JWT_AUDIENCE`, legacy fallback `SUPABASE_JWT_SECRET`, `DATABASE_URL`, `WORKSPACE_BACKEND=postgres`.
+- Variables: `SUPABASE_URL`, optional `SUPABASE_JWKS_URL`, optional `SUPABASE_JWT_AUDIENCE`, `DATABASE_URL`, `WORKSPACE_BACKEND=postgres`.
 - Test accounts: `field@`, `estimator@`, `manager@changeorder.test`. Passwords come from Bona privately.
 
 **Uriel (U6, sign-in in the app):**
