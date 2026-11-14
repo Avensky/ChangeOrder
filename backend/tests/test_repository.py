@@ -505,6 +505,21 @@ class unittest_env:
                 os.environ[key] = value
 
 
+class DatabaseUrlTests(unittest.TestCase):
+    def test_postgres_urls_name_the_psycopg_3_driver(self):
+        from db.database import normalize_database_url as normalize
+
+        self.assertEqual(normalize("postgres://u:p@h:5432/db"), "postgresql+psycopg://u:p@h:5432/db")
+        self.assertEqual(normalize("postgresql://u:p@h/db?sslmode=require"), "postgresql+psycopg://u:p@h/db?sslmode=require")
+        self.assertEqual(normalize("postgresql+psycopg://u:p@h/db"), "postgresql+psycopg://u:p@h/db")
+
+    def test_other_urls_are_left_alone(self):
+        from db.database import normalize_database_url as normalize
+
+        for url in ("sqlite://", "sqlite:///x.db", "postgresql+psycopg2://u:p@h/db"):
+            self.assertEqual(normalize(url), url)
+
+
 class SelectorTests(unittest.TestCase):
     def test_default_is_the_sqlite_prototype_store(self):
         from db import store_selector
