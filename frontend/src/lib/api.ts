@@ -1,8 +1,26 @@
 // Use the transport that supports Expo File objects, regardless of fetch env flags.
 import { fetch } from 'expo/fetch';
+import { Platform } from 'react-native';
 
 // Expo replaces this static reference with the value from frontend/.env.
-export const API_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, '');
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, '');
+
+// A LAN web page must not send the phone to its own localhost. Preserve the
+// configured API port; remote API hosts and native builds stay explicit.
+function webApiUrl() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || !configuredApiUrl) return configuredApiUrl;
+  try {
+    const url = new URL(configuredApiUrl);
+    const localHosts = ['localhost', '127.0.0.1', '[::1]'];
+    if (localHosts.includes(url.hostname) && !localHosts.includes(window.location.hostname)) {
+      url.hostname = window.location.hostname;
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return configuredApiUrl;
+  }
+}
+export const API_URL = webApiUrl();
 
 export async function requestJson<T>(
   path: string,
