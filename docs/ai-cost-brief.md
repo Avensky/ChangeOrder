@@ -2,7 +2,7 @@
 
 For Con, to judge feasibility. Prepared for Bona. All prices were read on **Nov 11, 2026** from the AWS pages listed under [Sources](#sources), are in US dollars before tax, and are pay-as-you-go ("on-demand") rates for US regions.
 
-**Bottom line.** With the recommended model, the AI costs about **4 cents per change order**. Starting with 1 GB of data, expect about **$7 to $50 a month** for 50 to 1,000 change orders. Each extra GB of data adds about $5 a month. The worst case modeled here is **under $400 a month**. AWS credits pay the first $100, which lasts about 2 to 14 months at those rates, and Cohyric pays after that; see [Who pays](#who-pays).
+**Bottom line.** With the recommended model, the AI costs about **4 cents per change order**. Starting with 1 GB of data, expect about **$7 to $50 a month** for 50 to 1,000 change orders. Each extra GB of data adds about $5 a month. The worst case modeled here is **under $400 a month**. AWS credits pay up to $100 until they expire around Apr 13, 2027, about 5 months away, and Cohyric pays after that; see [Who pays](#who-pays).
 
 **Decided by Bona on Nov 13, 2026.** Tad's data stays on US servers at all times. We start with a small amount of data and add more as needed. AWS credits pay up to $100, then Cohyric pays. The figure of 1.5 AI runs per change order stands until it can be tested on Tad's data.
 
@@ -65,17 +65,19 @@ Not included: hosting for the app's API, logging, photo storage, tax, and people
 
 ### Who pays
 
-AWS credits pay the first $100, then Cohyric pays the bill. The table uses the starting plan.
+AWS credits pay up to $100, then Cohyric pays the bill. On Nov 13, 2026 the credits had 151 days left, so they expire around Apr 13, 2027. That is 151 ÷ 30.4 = 4.97 months. Cohyric starts paying when the $100 runs out or the credits expire, whichever comes first. The table uses the starting plan.
 
-| Change orders a month | Monthly total | Months $100 lasts |
-| ---: | ---: | --- |
-| 50 | $7.29 | 100 ÷ 7.29 = 13.7 |
-| 200 | $14.10 | 100 ÷ 14.10 = 7.1 |
-| 1,000 | $50.41 | 100 ÷ 50.41 = 2.0 |
+| Change orders a month | Monthly total | Months until $100 runs out | Which comes first | Credit used |
+| ---: | ---: | --- | --- | --- |
+| 50 | $7.29 | 100 ÷ 7.29 = 13.7 | Expiry, at 4.97 months | 7.29 × 4.97 = $36.23 |
+| 200 | $14.10 | 100 ÷ 14.10 = 7.1 | Expiry, at 4.97 months | 14.10 × 4.97 = $70.08 |
+| 1,000 | $50.41 | 100 ÷ 50.41 = 2.0 | The $100, at 2.0 months | $100.00 |
+
+At 50 or 200 change orders a month, part of the credit goes unused. The proof of concept and the model comparison in section 4 are best run before Apr 13, 2027, while the credits pay for them.
 
 **The credits cover Claude.** AWS's general credit terms exclude AWS Marketplace charges unless AWS authorizes them [8], and Claude models are billed through Marketplace [4][5]. Bona checked our credit on Nov 13, 2026: it applies to Amazon Bedrock, Amazon Bedrock AgentCore and Amazon SageMaker AI, and Claude through Bedrock is covered.
 
-Two small limits remain. S3 is not on that list, so the S3 file storage, about 2 cents a month per GB, would be billed to Cohyric from the start. Credits expire on a date set when they are issued and do not pay tax [8]; if ours expire before the $100 is used, Cohyric starts paying sooner than the table shows.
+Two small limits remain. S3 is not on that list, so the S3 file storage, about 2 cents a month per GB, would be billed to Cohyric from the start. Credits do not pay tax [8].
 
 ## 4. Model choice
 
@@ -134,7 +136,7 @@ We start with the minimum tier and add data as needed.
 - **Fine-tuning instead of lookup**, or **sending photos to the AI**. Both are outside this budget and the spec excludes photos for now.
 - **Routing.** Decided: US servers only. Worldwide routing would be about 10% cheaper ($2.00 and $10.00 for Sonnet 5.5 [1]) but is ruled out because Tad's data would leave the US.
 - **Very long prompts on Haiku 5.5.** Above 100,000 input tokens the price is five times higher [1][4]. Our high case is 29,700.
-- **How we pay.** The $100 of AWS credits covers Bedrock, including Claude. If the credits expire early, or volume is near 1,000 change orders a month, Cohyric starts paying within about two months. See [Who pays](#who-pays).
+- **How we pay.** The $100 of AWS credits covers Bedrock, including Claude. Cohyric starts paying when the credits expire around Apr 13, 2027, or after about two months if volume is near 1,000 change orders a month. See [Who pays](#who-pays).
 - **Price changes.** AWS changed a Sonnet 5.5 rate as recently as Oct 7, 2026 [1]. Re-check before committing a budget.
 
 ## Not verified
@@ -144,7 +146,6 @@ We start with the minimum tier and add data as needed.
 - Whether Claude's reasoning is billed as output tokens.
 - Whether knowledge-base index storage is rounded up to a whole GB.
 - A fine-tuning price for Claude 5.5 models.
-- When our AWS credits expire. Bona confirmed on Nov 13 that they cover Claude through Bedrock; the expiry date is not recorded here.
 - The 1.5 runs per change order. Agreed as the working figure until tested on Tad's data.
 - That the Managed Knowledge Base is offered in the region we will use. The pricing page does not list regions for it.
 
