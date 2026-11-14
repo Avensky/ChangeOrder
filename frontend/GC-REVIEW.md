@@ -6,7 +6,7 @@ The GC opens `/approve?token=…` in a browser, without signing in. Opening or r
 
 1. Put the demo PC and phone on the same Wi-Fi or hotspot. Guest networks may block device-to-device traffic.
 2. Use the PC's LAN address (shown by `ipconfig` on Windows). In local `frontend/.env`, set `EXPO_PUBLIC_API_URL=http://<PC-LAN-IP>:8000`.
-3. Start the backend so it listens on the LAN (`0.0.0.0:8000`), and allow its port through the local firewall. Jalen owns backend configuration.
+3. Start the backend so it listens on the LAN (`0.0.0.0:8000`), and allow its port through the local firewall. Set its local `CORS_ORIGINS` to include `http://<PC-LAN-IP>:8081` (and any desktop origin you use), then restart it. Jalen owns backend configuration.
 4. Start Expo web from `frontend/`: `npm run web -- --lan`. Open `http://<PC-LAN-IP>:8081` on the phone. Expo Go is not needed for the external GC page.
 5. Set the backend's local `APP_URL=http://<PC-LAN-IP>:8081` and restart it before the estimator sends a new proposal. Jalen owns this setting. Old emails retain their old address; generate a new link. Never write the token into a document or PR.
 6. Open the emailed link or private console fallback on the phone. A link beginning with `localhost` points at the phone itself and must be regenerated with the correct APP_URL.
