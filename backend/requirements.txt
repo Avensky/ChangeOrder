@@ -3,3 +3,4 @@ python-multipart
 sqlmodel>=0.0.24,<0.1
 boto3>=1.35,<2
 psycopg[binary]>=3.2,<4
+PyJWT[crypto]>=2.8,<3
