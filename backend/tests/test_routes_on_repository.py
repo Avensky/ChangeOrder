@@ -39,9 +39,14 @@ class RoutesOnRepositoryTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory()
         cls.upload_dir = Path(cls.temporary.name)
-        from main import app
+        from fastapi import FastAPI
+
         import api.routes.changes as routes
 
+        # A bare app: importing main would mount /uploads from the real folder
+        # and break test_changes.py, which depends on that mount's folder.
+        app = FastAPI()
+        app.include_router(routes.router)
         cls.routes = routes
         cls.app = app
 
@@ -73,8 +78,7 @@ class RoutesOnRepositoryTests(unittest.TestCase):
         # Route uploads and the GC token capture to this test.
         self.patches = [
             patch.object(self.routes, "workflow", repository),
-            patch("services.photos.UPLOAD_DIR", self.upload_dir),
-            patch.object(self.routes, "UPLOAD_DIR", self.upload_dir),
+            patch("core.config.UPLOAD_DIR", self.upload_dir),
         ]
         for p in self.patches:
             p.start()

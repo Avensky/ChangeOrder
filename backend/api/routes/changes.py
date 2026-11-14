@@ -3,7 +3,9 @@ from contextlib import contextmanager
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from api.routes import session
+from core.auth import Caller, require_roles
 from schemas.changes import (
     Description,
     EstimatorReview,
@@ -16,7 +18,8 @@ from schemas.changes import (
 )
 from services import email, prototype_workflow
 from services.photos import save_photo
-from core.config import UPLOAD_DIR, email_settings
+import core.config as config
+from core.config import email_settings
 from db.repository import Conflict, NotFound
 from db.store_selector import store
 
@@ -27,7 +30,13 @@ from db.store_selector import store
 workflow = store if hasattr(store, "send_to_gc") else prototype_workflow
 
 router = APIRouter(prefix="/api/v1", tags=["changes"])
+router.include_router(session.router)
 ProjectId = Literal["north-park", "harbor", "cedar"]
+
+FIELD = require_roles("field")
+ESTIMATOR = require_roles("estimator")
+MANAGER = require_roles("manager")
+STAFF = require_roles("field", "estimator", "manager")
 
 
 @contextmanager
@@ -39,6 +48,20 @@ def _workflow_errors():
         raise HTTPException(404, str(error) or "Not found") from None
     except Conflict as error:
         raise HTTPException(409, str(error)) from None
+
+
+def _transaction(caller: Caller | None):
+    """Open the workflow transaction for the caller's company (postgres).
+
+    The prototype has one workspace and takes no company.
+    """
+    if caller is None:
+        return workflow.atomic()
+    return workflow.atomic(caller.company_id)
+
+
+def _actor_id(caller: Caller | None):
+    return None if caller is None else caller.id
 
 
 def _approval_link(token: str) -> str:
@@ -54,6 +77,7 @@ async def submit_change(
     title: Annotated[str, Form(max_length=120)] = "",
     project_id: ProjectId = Form("north-park"),
     submitted_by: Literal["contractor", "subcontractor"] = Form("contractor"),
+    caller: Caller | None = Depends(FIELD),
 ):
     if not 1 <= len(photos) <= 10:
         raise HTTPException(422, "Attach between 1 and 10 photos.")
@@ -61,13 +85,19 @@ async def submit_change(
     try:
         for photo in photos:
             keys.append(await save_photo(photo))
-        with _workflow_errors(), workflow.atomic():
+        with _workflow_errors(), _transaction(caller):
             return workflow.create_change(
-                description, severity, keys, title.strip(), project_id, submitted_by
+                description,
+                severity,
+                keys,
+                title.strip(),
+                project_id,
+                submitted_by,
+                submitted_by_user_id=_actor_id(caller),
             )
     except BaseException:
         for key in keys:
-            (UPLOAD_DIR / key).unlink(missing_ok=True)
+            (config.UPLOAD_DIR / key).unlink(missing_ok=True)
         raise
     finally:
         for photo in photos:
@@ -75,16 +105,20 @@ async def submit_change(
 
 
 @router.get("/changes", response_model=list[WorkspaceChangeOut])
-def list_changes(status: Status | None = None):
-    with _workflow_errors(), workflow.atomic():
+def list_changes(status: Status | None = None, caller: Caller | None = Depends(STAFF)):
+    with _workflow_errors(), _transaction(caller):
         return workflow.list_changes(status)
 
 
 # LEGACY: the float-money route the merged frontend still calls. Remove it
 # when U3 moves the app onto /review and /authorize.
 @router.post("/changes/{change_id}/admin-approve")
-def admin_approve(change_id: str, terms: ReviewTerms = Body(...)):
-    with _workflow_errors(), workflow.atomic():
+def admin_approve(
+    change_id: str,
+    terms: ReviewTerms = Body(...),
+    caller: Caller | None = Depends(ESTIMATOR),
+):
+    with _workflow_errors(), _transaction(caller):
         if workflow is prototype_workflow:
             return workflow.legacy_admin_approve(
                 change_id, terms.amount, terms.impact_days, terms.scope
@@ -105,20 +139,25 @@ def admin_approve(change_id: str, terms: ReviewTerms = Body(...)):
             terms.scope,
             Decimal(str(terms.amount)),
             terms.impact_days,
-            actor_name="Office Manager",
+            actor_name=caller.name if caller else "Office Manager",
+            actor_user_id=_actor_id(caller),
         )
         return {"status": sent["status"]}
 
 
 @router.post("/changes/{change_id}/review", response_model=WorkspaceChangeOut)
-def estimator_review(change_id: str, terms: EstimatorReview = Body(...)):
+def estimator_review(
+    change_id: str,
+    terms: EstimatorReview = Body(...),
+    caller: Caller | None = Depends(ESTIMATOR),
+):
     """The estimator saves scope, proposed cost and timeline, and sends it on.
 
     Reviewable from `submitted`, `in_review` and `authorized_to_proceed`: a
     fast-tracked change is authorized before the estimate exists, so it still
     needs its terms added afterwards.
     """
-    with _workflow_errors(), workflow.atomic():
+    with _workflow_errors(), _transaction(caller):
         if workflow.get_change(change_id) is None:
             raise HTTPException(404, "Not found")
         sent = workflow.send_to_gc(
@@ -128,7 +167,8 @@ def estimator_review(change_id: str, terms: EstimatorReview = Body(...)):
             # Decimal keeps the division exact.
             Decimal(terms.proposed_cost_cents) / 100,
             terms.requested_timeline_days,
-            actor_name="Estimator",
+            actor_name=caller.name if caller else "Estimator",
+            actor_user_id=_actor_id(caller),
         )
         link = _approval_link(sent["token"])
         c = workflow.get_change(change_id)
@@ -141,13 +181,13 @@ def estimator_review(change_id: str, terms: EstimatorReview = Body(...)):
 
 
 @router.post("/changes/{change_id}/authorize", response_model=WorkspaceChangeOut)
-def manager_authorize(change_id: str):
+def manager_authorize(change_id: str, caller: Caller | None = Depends(MANAGER)):
     """Fast track: the manager lets work start before the estimate exists.
 
     This authorizes work only. The GC still decides, so no timeout and no
     authorization here ever approves a change.
     """
-    with _workflow_errors(), workflow.atomic():
+    with _workflow_errors(), _transaction(caller):
         c = workflow.get_change(change_id)
         if c is None:
             raise HTTPException(404, "Not found")
@@ -155,7 +195,11 @@ def manager_authorize(change_id: str):
             raise HTTPException(409, "Only a high-priority change can be fast tracked")
         if c["status"] not in ("submitted", "in_review"):
             raise HTTPException(409, "This change is past the point of authorizing work")
-        workflow.authorize_to_proceed(change_id, actor_name="Manager")
+        workflow.authorize_to_proceed(
+            change_id,
+            actor_name=caller.name if caller else "Manager",
+            actor_user_id=_actor_id(caller),
+        )
         c = workflow.get_change(change_id)
         # A heads-up only. It carries no link, because there is nothing to
         # decide until the estimator adds the cost.
@@ -164,6 +208,7 @@ def manager_authorize(change_id: str):
         return c
 
 
+# The GC link is token-only: no staff account, and no role check.
 @router.get("/approval-session", response_model=WorkspaceChangeOut)
 def approval_session(token: str):
     with workflow.atomic():
@@ -189,23 +234,27 @@ def client_decline(token: str):
 
 
 @router.get("/notifications")
-def notifications(to: str):
-    with workflow.atomic():
+def notifications(to: str, caller: Caller | None = Depends(STAFF)):
+    with _transaction(caller):
         return workflow.list_notifications(to)
 
 
 @router.get("/projects/{project_id}/work-order")
-def project_work_order(project_id: ProjectId):
+def project_work_order(project_id: ProjectId, caller: Caller | None = Depends(STAFF)):
     # Derived from committed approvals: retries/reloads cannot double-count a change.
-    with workflow.atomic():
+    with _transaction(caller):
         return workflow.work_order(project_id)
 
 
 @router.post("/changes/{change_id}/suggestion", response_model=Suggestion)
-def suggest(change_id: str, request: SuggestionRequest):
+def suggest(
+    change_id: str,
+    request: SuggestionRequest,
+    caller: Caller | None = Depends(ESTIMATOR),
+):
     from services.suggestions import suggest_terms
 
-    with _workflow_errors(), workflow.atomic():
+    with _workflow_errors(), _transaction(caller):
         c = workflow.get_change(change_id)
         if c is None:
             raise HTTPException(404, "Not found")
@@ -213,6 +262,6 @@ def suggest(change_id: str, request: SuggestionRequest):
             raise HTTPException(409, "This change has already been reviewed")
         record = dict(c)
     result = suggest_terms(record, request.original_scope)
-    with _workflow_errors(), workflow.atomic():
+    with _workflow_errors(), _transaction(caller):
         workflow.save_suggestion(change_id, result.model_dump(), request.original_scope)
     return result
