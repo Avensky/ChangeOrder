@@ -2,7 +2,7 @@
 
 For Con, to judge feasibility. Prepared for Bona. All prices were read on **Nov 11, 2026** from the AWS pages listed under [Sources](#sources), are in US dollars before tax, and are pay-as-you-go ("on-demand") rates for US regions.
 
-**Bottom line.** With the recommended model, the AI costs about **4 cents per change order**. Starting with 1 GB of data, expect about **$7 to $50 a month** for 50 to 1,000 change orders. Each extra GB of data adds about $5 a month. The worst case modeled here is **under $400 a month**. AWS credits are meant to pay the first $100 and Cohyric pays after that; see [Who pays](#who-pays) for one catch.
+**Bottom line.** With the recommended model, the AI costs about **4 cents per change order**. Starting with 1 GB of data, expect about **$7 to $50 a month** for 50 to 1,000 change orders. Each extra GB of data adds about $5 a month. The worst case modeled here is **under $400 a month**. AWS credits pay the first $100, which lasts about 2 to 14 months at those rates, and Cohyric pays after that; see [Who pays](#who-pays).
 
 **Decided by Bona on Nov 13, 2026.** Tad's data stays on US servers at all times. We start with a small amount of data and add more as needed. AWS credits pay up to $100, then Cohyric pays. The figure of 1.5 AI runs per change order stands until it can be tested on Tad's data.
 
@@ -67,13 +67,15 @@ Not included: hosting for the app's API, logging, photo storage, tax, and people
 
 AWS credits pay the first $100, then Cohyric pays the bill. The table uses the starting plan.
 
-| Change orders a month | Monthly total | Months $100 lasts if credits cover everything | Model line Cohyric pays from month one if credits exclude Claude |
-| ---: | ---: | --- | ---: |
-| 50 | $7.29 | 100 ÷ 7.29 = 13.7 | $2.19 |
-| 200 | $14.10 | 100 ÷ 14.10 = 7.1 | $8.78 |
-| 1,000 | $50.41 | 100 ÷ 50.41 = 2.0 | $43.89 |
+| Change orders a month | Monthly total | Months $100 lasts |
+| ---: | ---: | --- |
+| 50 | $7.29 | 100 ÷ 7.29 = 13.7 |
+| 200 | $14.10 | 100 ÷ 14.10 = 7.1 |
+| 1,000 | $50.41 | 100 ÷ 50.41 = 2.0 |
 
-**The catch.** AWS's credit terms say credits are not applied to AWS Marketplace charges unless AWS authorizes it [8]. Both Claude models are billed through AWS Marketplace [4][5]. So the credits may not cover the model line, which is the last column. They would still cover the knowledge base and storage, about $5.10 to $6.52 a month. Check the credit's list of applicable products in the AWS Billing console before relying on it. Amazon Nova Pro's model card does not mention Marketplace billing [9], so it is the fallback if the credits must cover everything. Credits also expire on a date set when they are issued, and they do not pay tax [8].
+**The credits cover Claude.** AWS's general credit terms exclude AWS Marketplace charges unless AWS authorizes them [8], and Claude models are billed through Marketplace [4][5]. Bona checked our credit on Nov 13, 2026: it applies to Amazon Bedrock, Amazon Bedrock AgentCore and Amazon SageMaker AI, and Claude through Bedrock is covered.
+
+Two small limits remain. S3 is not on that list, so the S3 file storage, about 2 cents a month per GB, would be billed to Cohyric from the start. Credits expire on a date set when they are issued and do not pay tax [8]; if ours expire before the $100 is used, Cohyric starts paying sooner than the table shows.
 
 ## 4. Model choice
 
@@ -132,7 +134,7 @@ We start with the minimum tier and add data as needed.
 - **Fine-tuning instead of lookup**, or **sending photos to the AI**. Both are outside this budget and the spec excludes photos for now.
 - **Routing.** Decided: US servers only. Worldwide routing would be about 10% cheaper ($2.00 and $10.00 for Sonnet 5.5 [1]) but is ruled out because Tad's data would leave the US.
 - **Very long prompts on Haiku 5.5.** Above 100,000 input tokens the price is five times higher [1][4]. Our high case is 29,700.
-- **How we pay.** If the $100 of AWS credits does not cover Marketplace-billed Claude models, Cohyric pays the model line from the first month. See [Who pays](#who-pays).
+- **How we pay.** The $100 of AWS credits covers Bedrock, including Claude. If the credits expire early, or volume is near 1,000 change orders a month, Cohyric starts paying within about two months. See [Who pays](#who-pays).
 - **Price changes.** AWS changed a Sonnet 5.5 rate as recently as Oct 7, 2026 [1]. Re-check before committing a budget.
 
 ## Not verified
@@ -142,13 +144,13 @@ We start with the minimum tier and add data as needed.
 - Whether Claude's reasoning is billed as output tokens.
 - Whether knowledge-base index storage is rounded up to a whole GB.
 - A fine-tuning price for Claude 5.5 models.
-- Whether our AWS credits cover the Claude models. The general credit terms exclude AWS Marketplace charges unless AWS authorizes them [8], and I have not seen the terms of our specific credit or its expiry date.
+- When our AWS credits expire. Bona confirmed on Nov 13 that they cover Claude through Bedrock; the expiry date is not recorded here.
 - The 1.5 runs per change order. Agreed as the working figure until tested on Tad's data.
 - That the Managed Knowledge Base is offered in the region we will use. The pricing page does not list regions for it.
 
 ## Sources
 
-Sources 1 to 7 read Nov 11, 2026. Sources 8 and 9 read Nov 13, 2026.
+Sources 1 to 7 read Nov 11, 2026. Source 8 read Nov 13, 2026.
 
 1. Amazon Bedrock pricing: https://aws.amazon.com/bedrock/pricing/ (model prices, Titan embeddings, Managed Knowledge Base, Nova fine-tuning)
 2. Amazon S3 pricing: https://aws.amazon.com/s3/pricing/ (S3 Standard storage, S3 Vectors)
@@ -158,6 +160,5 @@ Sources 1 to 7 read Nov 11, 2026. Sources 8 and 9 read Nov 13, 2026.
 6. Knowledge base chunking: https://docs.aws.amazon.com/bedrock/latest/userguide/kb-chunking.html
 7. Knowledge base vector stores: https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-setup.html
 8. AWS Promotional Credit terms (last updated Sep 24, 2026): https://aws.amazon.com/awscredits/
-9. Amazon Nova Pro model card: https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-pro.html
 
 How the prices were read: the pricing pages fill in their Amazon, Anthropic, S3 and OpenSearch tables in the browser from AWS's own price files (under `https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/`). I downloaded the pages and those files and matched them up for US East (N. Virginia), and for US West (Oregon) on the Bedrock page. Both regions gave the same model prices. A quick spot-check of the three model rows in a browser is worthwhile before this goes to Con.
