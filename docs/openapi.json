@@ -153,7 +153,7 @@
           "changes"
         ],
         "summary": "Estimator Review",
-        "description": "The estimator saves scope, proposed cost and timeline, and sends it on.\n\nReviewable from `submitted`, from `in_review`, and from\n`authorized_to_proceed`: a fast-tracked change is authorized before the\nestimate exists, so it still needs its terms added afterwards.",
+        "description": "The estimator saves scope, proposed cost and timeline, and sends it on.\n\nReviewable from `submitted`, `in_review` and `authorized_to_proceed`: a\nfast-tracked change is authorized before the estimate exists, so it still\nneeds its terms added afterwards.",
         "operationId": "estimator_review_api_v1_changes__change_id__review_post",
         "parameters": [
           {
