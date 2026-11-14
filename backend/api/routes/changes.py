@@ -11,7 +11,7 @@ from schemas.changes import (
     SuggestionRequest,
     WorkspaceChangeOut,
 )
-from services import email, store
+from services import email, prototype_approval, store
 from services.photos import save_photo
 from core.config import UPLOAD_DIR, email_settings
 
@@ -106,7 +106,7 @@ def estimator_review(change_id: str, terms: EstimatorReview = Body(...)):
             raise HTTPException(404, "Not found")
         if c["status"] not in ("submitted", "in_review", "authorized_to_proceed"):
             raise HTTPException(409, "This change is no longer open for review")
-        link = store.record_review(
+        link = prototype_approval.record_review(
             c,
             terms.scope,
             terms.proposed_cost_cents,
@@ -142,7 +142,7 @@ def manager_authorize(change_id: str):
             raise HTTPException(409, "Only a high-priority change can be fast tracked")
         if c["status"] not in ("submitted", "in_review"):
             raise HTTPException(409, "This change is past the point of authorizing work")
-        store.authorize_fast_track(c)
+        prototype_approval.authorize_fast_track(c)
         # A heads-up only. It carries no link, because there is nothing to
         # decide until the estimator adds the cost.
         subject, body = email.fast_track_notice(c)

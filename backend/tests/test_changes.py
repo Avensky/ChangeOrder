@@ -41,6 +41,16 @@ class ChangeSubmissionTests(unittest.TestCase):
     def setUp(self):
         from services import store
 
+        # Capture console output: the GC's link is printed there (see gc_token).
+        self.printed = []
+        printer = patch(
+            "builtins.print",
+            side_effect=lambda *args, **kwargs: self.printed.append(
+                " ".join(str(arg) for arg in args)
+            ),
+        )
+        printer.start()
+        self.addCleanup(printer.stop)
         with store.atomic():
             store.CHANGES.clear()
             store.TOKENS.clear()
@@ -191,8 +201,10 @@ class ChangeSubmissionTests(unittest.TestCase):
         )
 
     def gc_token(self):
-        notices = self.client.get("/api/v1/notifications?to=gc").json()
-        return notices[-1]["msg"].split("token=")[1]
+        # The GC gets the link in the console line (or the email), never in a
+        # notification: notification_holds_no_token forbids that in the schema.
+        links = [line for line in self.printed if line.startswith("GC LINK:")]
+        return links[-1].split("token=")[1].split()[0]
 
     def test_estimator_terms_appear_on_the_gc_link(self):
         change = self.submit().json()
