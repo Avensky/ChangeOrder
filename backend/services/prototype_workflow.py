@@ -93,8 +93,7 @@ def send_to_gc(
         sent_for_approval=True,
     )
     add_event(c, "awaiting_gc", "Estimate saved and sent to the GC", actor_name)
-    # The prototype has always kept the GC's link in the GC's notifications.
-    notify("gc", c["id"], approval_link_for(token))
+    # The GC's link goes in the console line and the email, never a notification.
     return {"status": "awaiting_gc", "token": token}
 
 
