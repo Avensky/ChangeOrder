@@ -4,6 +4,7 @@ import base64
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -38,6 +39,16 @@ class ChangeSubmissionTests(unittest.TestCase):
     def setUp(self):
         from services import store
 
+        # Capture console output: the GC's link is printed there (see gc_token).
+        self.printed = []
+        printer = patch(
+            "builtins.print",
+            side_effect=lambda *args, **kwargs: self.printed.append(
+                " ".join(str(arg) for arg in args)
+            ),
+        )
+        printer.start()
+        self.addCleanup(printer.stop)
         with store.atomic():
             store.CHANGES.clear()
             store.TOKENS.clear()
@@ -184,6 +195,128 @@ class ChangeSubmissionTests(unittest.TestCase):
             self.client.post(
                 review, json={"amount": 123.45, "impact_days": 2}
             ).status_code,
+            409,
+        )
+
+    def gc_token(self):
+        # The GC gets the link in the console line (or the email), never in a
+        # notification: notification_holds_no_token forbids that in the schema.
+        links = [line for line in self.printed if line.startswith("GC LINK:")]
+        return links[-1].split("token=")[1].split()[0]
+
+    def test_estimator_terms_appear_on_the_gc_link(self):
+        change = self.submit().json()
+        review = self.client.post(
+            "/api/v1/changes/" + change["id"] + "/review",
+            json={
+                "scope": "Relocate outlet and test per revised plan",
+                "proposed_cost_cents": 123_45,
+                "requested_timeline_days": 2,
+            },
+        )
+        self.assertEqual(review.status_code, 200)
+        self.assertEqual(review.json()["status"], "awaiting_gc")
+        # The GC opens the link and sees exactly the terms the estimator saved.
+        seen = self.client.get(
+            "/api/v1/approval-session", params={"token": self.gc_token()}
+        )
+        self.assertEqual(seen.status_code, 200)
+        seen = seen.json()
+        self.assertEqual(seen["proposed_cost_cents"], 12345)
+        self.assertEqual(seen["requested_timeline_days"], 2)
+        self.assertEqual(seen["currency"], "USD")
+        self.assertEqual(seen["approved_scope"], "Relocate outlet and test per revised plan")
+
+    def test_gc_decides_a_reviewed_change_and_cannot_decide_twice(self):
+        change = self.submit().json()
+        self.client.post(
+            "/api/v1/changes/" + change["id"] + "/review",
+            json={"proposed_cost_cents": 50_000, "requested_timeline_days": 1},
+        )
+        token = self.gc_token()
+        decision = self.client.post(
+            "/api/v1/approval-session/decline", params={"token": token}
+        )
+        # The new vocabulary is "declined", not the legacy "rejected".
+        self.assertEqual(decision.json(), {"status": "declined"})
+        self.assertEqual(
+            self.client.post(
+                "/api/v1/approval-session/decline", params={"token": token}
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            self.client.get("/api/v1/projects/north-park/work-order").json()["revision"],
+            0,
+        )
+
+    def test_manager_authorizes_high_priority_work_before_any_estimate(self):
+        change = self.submit(severity="high").json()
+        authorized = self.client.post("/api/v1/changes/" + change["id"] + "/authorize")
+        self.assertEqual(authorized.status_code, 200)
+        authorized = authorized.json()
+        self.assertEqual(authorized["status"], "authorized_to_proceed")
+        self.assertIsNotNone(authorized["authorized_at"])
+        # Authorizing work must not invent an estimate or approve anything.
+        self.assertIsNone(authorized["proposed_cost_cents"])
+        self.assertEqual(
+            self.client.get("/api/v1/projects/north-park/work-order").json()["revision"],
+            0,
+        )
+
+    def test_fast_tracked_change_still_needs_the_gc_to_approve(self):
+        change = self.submit(severity="high").json()
+        self.client.post("/api/v1/changes/" + change["id"] + "/authorize")
+        # The estimator adds the cost after work was authorized.
+        review = self.client.post(
+            "/api/v1/changes/" + change["id"] + "/review",
+            json={"proposed_cost_cents": 250_000, "requested_timeline_days": 3},
+        )
+        self.assertEqual(review.json()["status"], "awaiting_gc")
+        decision = self.client.post(
+            "/api/v1/approval-session/approve", params={"token": self.gc_token()}
+        )
+        self.assertEqual(decision.json(), {"status": "approved"})
+        order = self.client.get("/api/v1/projects/north-park/work-order").json()
+        self.assertEqual((order["revision"], order["additional_amount"]), (1, 2500.0))
+
+    def test_only_high_priority_can_be_fast_tracked(self):
+        change = self.submit().json()
+        response = self.client.post("/api/v1/changes/" + change["id"] + "/authorize")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            self.client.get("/api/v1/changes").json()[0]["status"], "submitted"
+        )
+
+    def test_invalid_estimator_terms_change_nothing(self):
+        change = self.submit().json()
+        route = "/api/v1/changes/" + change["id"] + "/review"
+        for terms in [
+            {"proposed_cost_cents": -1, "requested_timeline_days": 0},
+            # Money is integer cents: a fractional cent is not a valid amount.
+            {"proposed_cost_cents": 1.5, "requested_timeline_days": 0},
+            {"proposed_cost_cents": 1, "requested_timeline_days": -1},
+            {"proposed_cost_cents": 1, "requested_timeline_days": 0, "currency": "usd"},
+            {"requested_timeline_days": 0},
+        ]:
+            with self.subTest(terms=terms):
+                self.assertEqual(self.client.post(route, json=terms).status_code, 422)
+        self.assertEqual(
+            self.client.get("/api/v1/changes").json()[0]["status"], "submitted"
+        )
+        self.assertEqual(self.client.get("/api/v1/notifications?to=gc").json(), [])
+
+    def test_a_decided_change_cannot_be_reviewed_again(self):
+        change = self.submit().json()
+        route = "/api/v1/changes/" + change["id"] + "/review"
+        terms = {"proposed_cost_cents": 1000, "requested_timeline_days": 1}
+        self.client.post(route, json=terms)
+        self.client.post(
+            "/api/v1/approval-session/approve", params={"token": self.gc_token()}
+        )
+        self.assertEqual(self.client.post(route, json=terms).status_code, 409)
+        self.assertEqual(
+            self.client.post("/api/v1/changes/" + change["id"] + "/authorize").status_code,
             409,
         )
 
