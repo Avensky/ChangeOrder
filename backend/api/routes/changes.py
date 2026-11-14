@@ -1,5 +1,8 @@
 import os
+from contextlib import contextmanager
+from decimal import Decimal
 from typing import Annotated, Literal
+
 from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from schemas.changes import (
     Description,
@@ -11,12 +14,36 @@ from schemas.changes import (
     SuggestionRequest,
     WorkspaceChangeOut,
 )
-from services import email, store
+from services import email, prototype_workflow
 from services.photos import save_photo
 from core.config import UPLOAD_DIR, email_settings
+from db.repository import Conflict, NotFound
+from db.store_selector import store
+
+# One set of workflow functions for both backends. The selected store is the
+# repository on postgres; on the default sqlite it is the services/store.py
+# module, which lacks the query and decision functions, so those come from
+# services/prototype_workflow.py. Both raise the repository's NotFound/Conflict.
+workflow = store if hasattr(store, "send_to_gc") else prototype_workflow
 
 router = APIRouter(prefix="/api/v1", tags=["changes"])
 ProjectId = Literal["north-park", "harbor", "cedar"]
+
+
+@contextmanager
+def _workflow_errors():
+    """Map workflow errors to HTTP. Put outside atomic() so it rolls back first."""
+    try:
+        yield
+    except NotFound as error:
+        raise HTTPException(404, str(error) or "Not found") from None
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from None
+
+
+def _approval_link(token: str) -> str:
+    base = os.getenv("APP_URL", "http://localhost:8081").rstrip("/")
+    return f"{base}/approve?token={token}"
 
 
 @router.post("/changes", response_model=WorkspaceChangeOut, status_code=201)
@@ -34,8 +61,8 @@ async def submit_change(
     try:
         for photo in photos:
             keys.append(await save_photo(photo))
-        with store.atomic():
-            return store.create_change(
+        with _workflow_errors(), workflow.atomic():
+            return workflow.create_change(
                 description, severity, keys, title.strip(), project_id, submitted_by
             )
     except BaseException:
@@ -49,81 +76,67 @@ async def submit_change(
 
 @router.get("/changes", response_model=list[WorkspaceChangeOut])
 def list_changes(status: Status | None = None):
-    with store.atomic():
-        return [
-            c for c in store.CHANGES.values() if status is None or c["status"] == status
-        ]
+    with _workflow_errors(), workflow.atomic():
+        return workflow.list_changes(status)
 
 
+# LEGACY: the float-money route the merged frontend still calls. Remove it
+# when U3 moves the app onto /review and /authorize.
 @router.post("/changes/{change_id}/admin-approve")
 def admin_approve(change_id: str, terms: ReviewTerms = Body(...)):
-    with store.atomic():
-        c = store.CHANGES.get(change_id)
-        if not c:
+    with _workflow_errors(), workflow.atomic():
+        if workflow is prototype_workflow:
+            return workflow.legacy_admin_approve(
+                change_id, terms.amount, terms.impact_days, terms.scope
+            )
+        # On postgres the legacy route can only send to the GC. It never
+        # approves a high-priority change without the GC (AGENTS.md).
+        c = workflow.get_change(change_id)
+        if c is None:
             raise HTTPException(404, "Not found")
         if c["status"] != "submitted":
             raise HTTPException(409, "This change has already been reviewed")
-        c.update(
-            amount=terms.amount,
-            impact_days=terms.impact_days,
-            approved_scope=terms.scope or c["description"],
-        )
-        # Preserve the existing prototype urgent approval policy.
         if c["severity"] == "high":
-            c["status"] = "approved"
-            store.add_event(
-                c,
-                "approved",
-                "Urgent change approved; work order updated",
-                "Office Manager",
+            raise HTTPException(
+                409, "Fast-track changes use /authorize, then /review; the GC decides"
             )
-            store.notify(
-                "contractor", change_id, "Approved; project work order updated"
-            )
-        else:
-            c.update(status="awaiting_client", sent_for_approval=True)
-            token = store.issue_client_token(change_id)
-            link = (
-                os.getenv("APP_URL", "http://localhost:8081").rstrip("/")
-                + f"/approve?token={token}"
-            )
-            store.notify("client", change_id, link)
-            store.add_event(c, "awaiting_client", "Sent to approver", "Office Manager")
-        return {"status": c["status"]}
+        sent = workflow.send_to_gc(
+            change_id,
+            terms.scope,
+            Decimal(str(terms.amount)),
+            terms.impact_days,
+            actor_name="Office Manager",
+        )
+        return {"status": sent["status"]}
 
 
 @router.post("/changes/{change_id}/review", response_model=WorkspaceChangeOut)
 def estimator_review(change_id: str, terms: EstimatorReview = Body(...)):
     """The estimator saves scope, proposed cost and timeline, and sends it on.
 
-    Reviewable from `submitted`, from `in_review`, and from
-    `authorized_to_proceed`: a fast-tracked change is authorized before the
-    estimate exists, so it still needs its terms added afterwards.
+    Reviewable from `submitted`, `in_review` and `authorized_to_proceed`: a
+    fast-tracked change is authorized before the estimate exists, so it still
+    needs its terms added afterwards.
     """
-    with store.atomic():
-        c = store.CHANGES.get(change_id)
-        if not c:
+    with _workflow_errors(), workflow.atomic():
+        if workflow.get_change(change_id) is None:
             raise HTTPException(404, "Not found")
-        if c["status"] not in ("submitted", "in_review", "authorized_to_proceed"):
-            raise HTTPException(409, "This change is no longer open for review")
-        link = store.record_review(
-            c,
+        sent = workflow.send_to_gc(
+            change_id,
             terms.scope,
-            terms.proposed_cost_cents,
+            # Money is integer cents on the API and dollars inside the workflow;
+            # Decimal keeps the division exact.
+            Decimal(terms.proposed_cost_cents) / 100,
             terms.requested_timeline_days,
-            terms.currency,
+            actor_name="Estimator",
         )
+        link = _approval_link(sent["token"])
+        c = workflow.get_change(change_id)
         subject, body = email.approval_request(c, link)
-        sent = email.send(email_settings()["gc_address"], subject, body)
+        sent_by_email = email.send(email_settings()["gc_address"], subject, body)
         # The console link is the fallback and stays printed either way, so the
         # demo works with no email key and when the provider is down.
-        print("GC LINK:", link, "(emailed)" if sent else "(not emailed)")
-        store.add_event(
-            c,
-            "awaiting_gc",
-            "Approval email sent to the GC" if sent else "GC link ready (email off)",
-            "System",
-        )
+        print("GC LINK:", link, "(emailed)" if sent_by_email else "(not emailed)")
         return c
 
 
@@ -134,15 +147,16 @@ def manager_authorize(change_id: str):
     This authorizes work only. The GC still decides, so no timeout and no
     authorization here ever approves a change.
     """
-    with store.atomic():
-        c = store.CHANGES.get(change_id)
-        if not c:
+    with _workflow_errors(), workflow.atomic():
+        c = workflow.get_change(change_id)
+        if c is None:
             raise HTTPException(404, "Not found")
         if c["severity"] != "high":
             raise HTTPException(409, "Only a high-priority change can be fast tracked")
         if c["status"] not in ("submitted", "in_review"):
             raise HTTPException(409, "This change is past the point of authorizing work")
-        store.authorize_fast_track(c)
+        workflow.authorize_to_proceed(change_id, actor_name="Manager")
+        c = workflow.get_change(change_id)
         # A heads-up only. It carries no link, because there is nothing to
         # decide until the estimator adds the cost.
         subject, body = email.fast_track_notice(c)
@@ -152,77 +166,53 @@ def manager_authorize(change_id: str):
 
 @router.get("/approval-session", response_model=WorkspaceChangeOut)
 def approval_session(token: str):
-    with store.atomic():
-        c = store.change_for_token(token)
+    with workflow.atomic():
+        c = workflow.change_for_token(token)
         if not c:
             raise HTTPException(404, "Invalid link")
         return c
 
 
-def _decide(token, approving):
-    with store.atomic():
-        c = store.change_for_token(token)
-        if not c:
-            raise HTTPException(404, "Invalid link")
-        # A change sent by /review waits in awaiting_gc; one sent by the legacy
-        # /admin-approve waits in awaiting_client. Both are a pending decision.
-        if c["status"] not in ("awaiting_gc", "awaiting_client"):
-            raise HTTPException(409, "Already decided")
-        # Answer a legacy request in legacy words so the merged frontend, which
-        # tests for "rejected", keeps working until U3 lands.
-        legacy = c["status"] == "awaiting_client"
-        if approving:
-            new_status = "approved"
-        else:
-            new_status = "rejected" if legacy else "declined"
-        c["status"] = new_status
-        title = (
-            "Change approved; work order updated" if approving else "Change declined"
-        )
-        store.add_event(c, new_status, title, "GC")
-        store.notify("contractor" if legacy else "office", c["id"], title)
-        return {"status": new_status}
+def _decide(token, decision):
+    with _workflow_errors(), workflow.atomic():
+        return workflow.decide(token, decision)
 
 
 @router.post("/approval-session/approve")
 def client_approve(token: str):
-    return _decide(token, True)
+    return _decide(token, "approved")
 
 
 @router.post("/approval-session/decline")
 def client_decline(token: str):
-    return _decide(token, False)
+    return _decide(token, "declined")
 
 
 @router.get("/notifications")
 def notifications(to: str):
-    with store.atomic():
-        return [n for n in store.NOTIFICATIONS if n["to"] == to]
+    with workflow.atomic():
+        return workflow.list_notifications(to)
 
 
 @router.get("/projects/{project_id}/work-order")
 def project_work_order(project_id: ProjectId):
     # Derived from committed approvals: retries/reloads cannot double-count a change.
-    with store.atomic():
-        return store.work_order(project_id)
+    with workflow.atomic():
+        return workflow.work_order(project_id)
 
 
 @router.post("/changes/{change_id}/suggestion", response_model=Suggestion)
 def suggest(change_id: str, request: SuggestionRequest):
     from services.suggestions import suggest_terms
 
-    with store.atomic():
-        c = store.CHANGES.get(change_id)
-        if not c:
+    with _workflow_errors(), workflow.atomic():
+        c = workflow.get_change(change_id)
+        if c is None:
             raise HTTPException(404, "Not found")
         if c["status"] != "submitted":
             raise HTTPException(409, "This change has already been reviewed")
         record = dict(c)
     result = suggest_terms(record, request.original_scope)
-    with store.atomic():
-        c = store.CHANGES[change_id]
-        if c["status"] != "submitted":
-            raise HTTPException(409, "This change has already been reviewed")
-        c["suggestion"] = result.model_dump()
-        c["original_scope"] = request.original_scope
+    with _workflow_errors(), workflow.atomic():
+        workflow.save_suggestion(change_id, result.model_dump(), request.original_scope)
     return result
