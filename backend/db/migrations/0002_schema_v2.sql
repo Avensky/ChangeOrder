@@ -8,8 +8,12 @@
 -- shared Supabase project without Bona.
 --
 -- What happens to existing rows:
---   * Every row is put in one new company named 'Default company'.
---     Rename it afterwards.
+--   * Every row is put in one new company named 'Default company', and every
+--     change in one new project named 'Default project'. Rename them
+--     afterwards.
+--   * Each change gets a number (1, 2, 3, ... in id order), a title (the
+--     first 80 characters of its description) and one history entry for its
+--     submission. Each notification gets a message that matches its type.
 --   * Roles: contractor -> field, client -> gc, admin -> estimator.
 --     'admin' covered both the estimator and the manager. This file picks
 --     estimator, the role that cannot authorize work. Promote the right
@@ -41,9 +45,12 @@ BEGIN
         RAISE EXCEPTION '0002_schema_v2 is already applied to this database.';
     END IF;
     IF to_regclass('public.company') IS NOT NULL
+       OR to_regclass('public.project') IS NOT NULL
        OR to_regclass('public.photo') IS NOT NULL
+       OR to_regclass('public.change_history') IS NOT NULL
+       OR to_regclass('public.ai_suggestion') IS NOT NULL
        OR to_regclass('public.approval_link') IS NOT NULL THEN
-        RAISE EXCEPTION 'A company, photo or approval_link table already exists. Nothing was changed.';
+        RAISE EXCEPTION 'A schema v2 table (company, project, photo, change_history, ai_suggestion or approval_link) already exists. Nothing was changed.';
     END IF;
 END $$;
 
@@ -120,7 +127,32 @@ CREATE UNIQUE INDEX ix_user_auth_user_id ON "user" (auth_user_id);
 CREATE INDEX ix_user_company_id_role ON "user" (company_id, role);
 
 -- ---------------------------------------------------------------------------
--- 3. change_event: the one status set, fast-track authorization
+-- 3. project: the job a change belongs to
+-- ---------------------------------------------------------------------------
+-- A project's work order is not stored. It is the project's approved changes,
+-- each with the revision the GC approved (query in README.md).
+CREATE TABLE project (
+    id SERIAL NOT NULL,
+    company_id INTEGER NOT NULL,
+    slug VARCHAR NOT NULL,
+    name VARCHAR NOT NULL,
+    base_budget_cents BIGINT,
+    currency VARCHAR NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT project_currency_valid CHECK (length(currency) = 3 AND currency = upper(currency)),
+    CONSTRAINT uq_project_company_id_id UNIQUE (company_id, id),
+    CONSTRAINT uq_project_company_id_slug UNIQUE (company_id, slug),
+    FOREIGN KEY (company_id) REFERENCES company (id)
+);
+
+-- Changes reported before projects existed all go to one project.
+INSERT INTO project (company_id, slug, name, currency, created_at)
+SELECT (SELECT min(id) FROM company), 'default', 'Default project', 'USD', now()
+WHERE EXISTS (SELECT 1 FROM change_event);
+
+-- ---------------------------------------------------------------------------
+-- 4. change_event: project, number, title, the one status set, fast track
 -- ---------------------------------------------------------------------------
 ALTER TABLE change_event RENAME COLUMN contractor_id TO submitted_by_id;
 ALTER INDEX ix_change_event_contractor_id RENAME TO ix_change_event_submitted_by_id;
@@ -128,8 +160,24 @@ ALTER INDEX ix_change_event_contractor_id RENAME TO ix_change_event_submitted_by
 ALTER TABLE change_event
     DROP CONSTRAINT change_event_contractor_id_fkey,
     DROP CONSTRAINT change_event_status_valid,
+    ADD COLUMN project_id INTEGER,
+    ADD COLUMN number INTEGER,
+    ADD COLUMN title VARCHAR,
     ADD COLUMN authorized_by_id INTEGER,
     ADD COLUMN authorized_at TIMESTAMP WITH TIME ZONE;
+
+UPDATE change_event AS e
+SET project_id = (SELECT min(id) FROM project),
+    title = left(e.description, 80),
+    number = numbered.n
+FROM (SELECT id, row_number() OVER (PARTITION BY company_id ORDER BY id) AS n
+      FROM change_event) AS numbered
+WHERE numbered.id = e.id;
+
+ALTER TABLE change_event
+    ALTER COLUMN project_id SET NOT NULL,
+    ALTER COLUMN number SET NOT NULL,
+    ALTER COLUMN title SET NOT NULL;
 
 UPDATE change_event AS e
 SET status = COALESCE(
@@ -158,6 +206,9 @@ ALTER TABLE change_event
         CHECK (authorized_at IS NULL OR severity = 'high'),
     ADD CONSTRAINT change_event_authorized_status_needs_authorization
         CHECK (status <> 'authorized_to_proceed' OR authorized_at IS NOT NULL),
+    ADD CONSTRAINT uq_change_event_company_id_number UNIQUE (company_id, number),
+    ADD CONSTRAINT fk_change_event_project_id_company
+        FOREIGN KEY (company_id, project_id) REFERENCES project (company_id, id),
     ADD CONSTRAINT fk_change_event_submitted_by_id_company
         FOREIGN KEY (company_id, submitted_by_id) REFERENCES "user" (company_id, id),
     ADD CONSTRAINT fk_change_event_authorized_by_id_company
@@ -165,9 +216,72 @@ ALTER TABLE change_event
 
 DROP INDEX ix_change_event_status;
 CREATE INDEX ix_change_event_company_id_status ON change_event (company_id, status);
+CREATE INDEX ix_change_event_company_id_project_id ON change_event (company_id, project_id);
 
 -- ---------------------------------------------------------------------------
--- 4. photo: several photos per change
+-- 5. change_history: the timeline of a change
+-- ---------------------------------------------------------------------------
+CREATE TABLE change_history (
+    id SERIAL NOT NULL,
+    company_id INTEGER NOT NULL,
+    change_event_id INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    title VARCHAR NOT NULL,
+    actor_user_id INTEGER,
+    actor_name VARCHAR NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT change_history_status_valid
+        CHECK (status IN ('submitted', 'in_review', 'authorized_to_proceed', 'awaiting_gc',
+                          'approved', 'declined', 'withdrawn')),
+    CONSTRAINT fk_change_history_change_event_id_company
+        FOREIGN KEY (company_id, change_event_id) REFERENCES change_event (company_id, id),
+    CONSTRAINT fk_change_history_actor_user_id_company
+        FOREIGN KEY (company_id, actor_user_id) REFERENCES "user" (company_id, id),
+    FOREIGN KEY (company_id) REFERENCES company (id)
+);
+CREATE INDEX ix_change_history_company_id_change_event_id
+    ON change_history (company_id, change_event_id);
+
+-- The one event known for an old change: who submitted it, and when.
+INSERT INTO change_history (company_id, change_event_id, status, title, actor_user_id, actor_name, created_at)
+SELECT e.company_id, e.id, 'submitted', 'Change request submitted', u.id, u.name, e.created_at
+FROM change_event AS e
+JOIN "user" AS u ON u.id = e.submitted_by_id
+ORDER BY e.id;
+
+-- ---------------------------------------------------------------------------
+-- 6. ai_suggestion: advisory estimates kept for the estimator
+-- ---------------------------------------------------------------------------
+CREATE TABLE ai_suggestion (
+    id SERIAL NOT NULL,
+    company_id INTEGER NOT NULL,
+    change_event_id INTEGER NOT NULL,
+    original_scope VARCHAR NOT NULL,
+    suggested_scope VARCHAR NOT NULL,
+    suggested_cost_cents BIGINT NOT NULL,
+    currency VARCHAR NOT NULL,
+    suggested_timeline_days INTEGER NOT NULL,
+    rationale VARCHAR NOT NULL,
+    in_scope BOOLEAN NOT NULL,
+    model_id VARCHAR,
+    confidence FLOAT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT ai_suggestion_currency_valid CHECK (length(currency) = 3 AND currency = upper(currency)),
+    CONSTRAINT ai_suggestion_cost_valid CHECK (suggested_cost_cents >= 0),
+    CONSTRAINT ai_suggestion_timeline_valid CHECK (suggested_timeline_days >= 0),
+    CONSTRAINT ai_suggestion_confidence_valid
+        CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+    CONSTRAINT fk_ai_suggestion_change_event_id_company
+        FOREIGN KEY (company_id, change_event_id) REFERENCES change_event (company_id, id),
+    FOREIGN KEY (company_id) REFERENCES company (id)
+);
+CREATE INDEX ix_ai_suggestion_company_id_change_event_id
+    ON ai_suggestion (company_id, change_event_id);
+
+-- ---------------------------------------------------------------------------
+-- 7. photo: several photos per change
 -- ---------------------------------------------------------------------------
 CREATE TABLE photo (
     id SERIAL NOT NULL,
@@ -192,7 +306,7 @@ ORDER BY id;
 ALTER TABLE change_event DROP COLUMN photo_key;
 
 -- ---------------------------------------------------------------------------
--- 5. change_order: its status now lives on the change
+-- 8. change_order: its status now lives on the change
 -- ---------------------------------------------------------------------------
 -- Dropping the column also drops ix_change_order_status and
 -- change_order_status_valid.
@@ -203,7 +317,7 @@ ALTER TABLE change_order
         FOREIGN KEY (company_id, change_event_id) REFERENCES change_event (company_id, id);
 
 -- ---------------------------------------------------------------------------
--- 6. change_order_revision: proposed cost and requested timeline
+-- 9. change_order_revision: proposed cost and requested timeline
 -- ---------------------------------------------------------------------------
 ALTER TABLE change_order_revision
     ADD COLUMN proposed_cost_cents BIGINT,
@@ -214,6 +328,9 @@ UPDATE change_order_revision SET currency = 'USD';
 
 ALTER TABLE change_order_revision
     ALTER COLUMN currency SET NOT NULL,
+    -- The review form has scope, cost and days only; title and reason are optional.
+    ALTER COLUMN title DROP NOT NULL,
+    ALTER COLUMN reason DROP NOT NULL,
     DROP CONSTRAINT change_order_revision_change_order_id_fkey,
     ADD CONSTRAINT change_order_revision_currency_valid
         CHECK (length(currency) = 3 AND currency = upper(currency)),
@@ -245,7 +362,7 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 7. approval_request: the GC, not the "client"
+-- 10. approval_request: the GC, not the "client"
 -- ---------------------------------------------------------------------------
 ALTER TABLE approval_request RENAME COLUMN client_id TO gc_user_id;
 ALTER INDEX ix_approval_request_client_id RENAME TO ix_approval_request_gc_user_id;
@@ -259,7 +376,7 @@ ALTER TABLE approval_request
         FOREIGN KEY (company_id, gc_user_id) REFERENCES "user" (company_id, id);
 
 -- ---------------------------------------------------------------------------
--- 8. approval_link: the emailed GC link, token hash only
+-- 11. approval_link: the emailed GC link, token hash only
 -- ---------------------------------------------------------------------------
 CREATE TABLE approval_link (
     id SERIAL NOT NULL,
@@ -284,7 +401,7 @@ CREATE UNIQUE INDEX uq_approval_link_live_request
     ON approval_link (approval_request_id) WHERE revoked_at IS NULL;
 
 -- ---------------------------------------------------------------------------
--- 9. approval_decision
+-- 12. approval_decision
 -- ---------------------------------------------------------------------------
 ALTER TABLE approval_decision RENAME COLUMN approved_by_id TO decided_by_id;
 ALTER INDEX ix_approval_decision_approved_by_id RENAME TO ix_approval_decision_decided_by_id;
@@ -303,12 +420,14 @@ ALTER TABLE approval_decision
 CREATE INDEX ix_approval_decision_company_id ON approval_decision (company_id);
 
 -- ---------------------------------------------------------------------------
--- 10. notifications: one type per status a change can move to
+-- 13. notifications: message text, link target, one type per status
 -- ---------------------------------------------------------------------------
 ALTER TABLE notifications
     DROP CONSTRAINT notification_type_valid,
     DROP CONSTRAINT notifications_report_id_fkey,
-    DROP CONSTRAINT notifications_recipient_user_id_fkey;
+    DROP CONSTRAINT notifications_recipient_user_id_fkey,
+    ADD COLUMN message VARCHAR,
+    ADD COLUMN link_target VARCHAR;
 
 UPDATE notifications
 SET type = CASE type
@@ -318,7 +437,21 @@ SET type = CASE type
                ELSE type  -- approval_requested
            END;
 
+-- Old rows had no text. Give each the line that matches its type.
+UPDATE notifications
+SET message = CASE type
+                  WHEN 'change_submitted' THEN 'New change order submitted'
+                  WHEN 'approval_requested' THEN 'Sent to the GC for approval'
+                  WHEN 'change_approved' THEN 'Change approved'
+                  WHEN 'change_declined' THEN 'Change declined'
+              END;
+
 ALTER TABLE notifications
+    ALTER COLUMN message SET NOT NULL,
+    -- The GC token exists only in the email. It must never be saved here.
+    ADD CONSTRAINT notification_holds_no_token
+        CHECK (message NOT LIKE '%token=%'
+               AND (link_target IS NULL OR link_target NOT LIKE '%token=%')),
     ADD CONSTRAINT notification_type_valid
         CHECK (type IN ('change_submitted', 'change_in_review', 'work_authorized',
                         'approval_requested', 'change_approved', 'change_declined',
@@ -333,7 +466,7 @@ CREATE INDEX ix_notifications_company_id_recipient_user_id
     ON notifications (company_id, recipient_user_id);
 
 -- ---------------------------------------------------------------------------
--- 11. Close the tables to Supabase's public Data API
+-- 14. Close the tables to Supabase's public Data API
 -- ---------------------------------------------------------------------------
 -- Supabase serves every table in the public schema over its REST API to
 -- anyone holding the project's anon key, unless row level security is on.
@@ -342,8 +475,11 @@ CREATE INDEX ix_notifications_company_id_recipient_user_id
 -- backend, never to the database, so nothing else should need access.
 ALTER TABLE company               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "user"                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE change_event          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE photo                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE change_history        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_suggestion         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE change_order          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE change_order_revision ENABLE ROW LEVEL SECURITY;
 ALTER TABLE approval_request      ENABLE ROW LEVEL SECURITY;
