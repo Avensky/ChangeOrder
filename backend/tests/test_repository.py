@@ -270,6 +270,9 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual([h["kind"] for h in saved["history"]], ["submitted", "awaiting_client", "approved"])
         # the decision wrote its notification in the same transaction
         self.assertEqual([n["msg"] for n in contractor], ["Change approved; work order updated"])
+        with repository.atomic(self.cid):
+            admin = [n for n in repository.list_notifications("admin") if n["type"] == "change_approved"]
+        self.assertEqual(len(admin), 2)  # the estimator and the manager
         self.assertEqual(self.count(ApprovalDecision), 1)
 
     def test_decline_does_not_update_the_work_order(self):

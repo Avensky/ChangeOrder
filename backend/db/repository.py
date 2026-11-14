@@ -803,7 +803,9 @@ def decide(token: str, decision: str, actor_name: str | None = None) -> dict:
     title = "Change approved; work order updated" if decision == "approved" else "Change declined"
     _record(event, decision, title, actor_name or gc.name, gc.id)
     kind = "change_approved" if decision == "approved" else "change_declined"
-    _notify_users([_submitter(event), *_users_with_roles("estimator")], event.id, kind, title)
+    _notify_users(
+        [_submitter(event), *_users_with_roles("estimator", "manager")], event.id, kind, title
+    )
     try:
         session.flush()
     except IntegrityError:
