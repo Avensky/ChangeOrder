@@ -56,7 +56,7 @@ export const roles: Record<
     caption: "Coordinate changes across projects",
   },
   subcontractor: {
-    label: "Subcontractor",
+    label: "Field",
     person: "Marcus Rivera",
     initials: "MR",
     caption: "Report site changes and track submissions",

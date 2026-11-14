@@ -11,7 +11,7 @@ export type ChangeOrder = {
   code: string;
   title: string;
   project_id: string;
-  submitted_by: "contractor" | "subcontractor";
+  submitted_by: "field" | "contractor" | "subcontractor";
   author: string;
   created_at: string;
   description: string;
