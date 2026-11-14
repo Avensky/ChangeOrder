@@ -2,7 +2,9 @@
 
 For Con, to judge feasibility. Prepared for Bona. All prices were read on **Nov 11, 2026** from the AWS pages listed under [Sources](#sources), are in US dollars before tax, and are pay-as-you-go ("on-demand") rates for US regions.
 
-**Bottom line.** With the recommended model, the AI costs about **4 cents per change order**. Expect about **$27 to $71 a month** for 50 to 1,000 change orders, and **under $400 a month** in the worst case modeled here. Up to a few hundred change orders a month, most of the bill is knowledge-base storage, so it depends more on how much data we load than on how many change orders we run.
+**Bottom line.** With the recommended model, the AI costs about **4 cents per change order**. Starting with 1 GB of data, expect about **$7 to $50 a month** for 50 to 1,000 change orders. Each extra GB of data adds about $5 a month. The worst case modeled here is **under $400 a month**. AWS credits are meant to pay the first $100 and Cohyric pays after that; see [Who pays](#who-pays) for one catch.
+
+**Decided by Bona on Nov 13, 2026.** Tad's data stays on US servers at all times. We start with a small amount of data and add more as needed. AWS credits pay up to $100, then Cohyric pays. The figure of 1.5 AI runs per change order stands until it can be tested on Tad's data.
 
 **The Nov 4 figures are not confirmed.** The notes quoted about $0.02 per 1M input tokens and about $10 per 10M output tokens ($1 per 1M). No text model in the US-region tables of the Bedrock pricing page has those prices; the cheapest input price I found is $0.035 per 1M [1]. $0.02 per 1M is the price of Amazon Titan Text Embeddings V2, a search-indexing model that cannot write an answer [1]. The recommended model costs $2.20 per 1M input and $11.00 per 1M output, which is 110 times and 11 times the Nov 4 figures. The budget is still small because each estimate uses few tokens.
 
@@ -49,19 +51,33 @@ Uses the recommended model, Claude Sonnet 5.5, at $2.20 per 1M input tokens and 
 
 - Model = change orders × cost per change order.
 - Retrieval = change orders × runs × $0.001 (one knowledge-base lookup per run, at $1.00 per 1,000 lookups [1]).
-- Storage = data size × ($5.00 knowledge-base index [1] + $0.023 S3 file storage [2]) per GB per month. Assumed data size: 1 GB low, 5 GB expected, 20 GB high. That gives $5.02, $25.12 and $100.46 a month.
+- Storage = data size × ($5.00 knowledge-base index [1] + $0.023 S3 file storage [2]) per GB per month. We start with 1 GB, which is $5.02 a month. The worst case assumes 20 GB, which is $100.46 a month.
 
-| Change orders a month | Low (1 GB) | Expected (5 GB) | High (20 GB) |
+| Change orders a month | Low use, 1 GB | **Starting plan: expected use, 1 GB** | Worst case: high use, 20 GB |
 | ---: | --- | --- | --- |
-| 50 | 0.54 + 0.05 + 5.02 = **$5.61** | 2.19 + 0.08 + 25.12 = **$27.39** | 14.75 + 0.15 + 100.46 = **$115.36** |
-| 200 | 2.18 + 0.20 + 5.02 = **$7.40** | 8.78 + 0.30 + 25.12 = **$34.20** | 59.00 + 0.60 + 100.46 = **$160.06** |
-| 1,000 | 10.89 + 1.00 + 5.02 = **$16.91** | 43.89 + 1.50 + 25.12 = **$70.51** | 295.02 + 3.00 + 100.46 = **$398.48** |
+| 50 | 0.54 + 0.05 + 5.02 = $5.61 | 2.19 + 0.08 + 5.02 = **$7.29** | 14.75 + 0.15 + 100.46 = $115.36 |
+| 200 | 2.18 + 0.20 + 5.02 = $7.40 | 8.78 + 0.30 + 5.02 = **$14.10** | 59.00 + 0.60 + 100.46 = $160.06 |
+| 1,000 | 10.89 + 1.00 + 5.02 = $16.91 | 43.89 + 1.50 + 5.02 = **$50.41** | 295.02 + 3.00 + 100.46 = $398.48 |
+
+As data grows, add $5.02 a month for each extra GB. At 5 GB that is 4 × 5.02 = $20.08 more.
 
 Not included: hosting for the app's API, logging, photo storage, tax, and people's time.
 
+### Who pays
+
+AWS credits pay the first $100, then Cohyric pays the bill. The table uses the starting plan.
+
+| Change orders a month | Monthly total | Months $100 lasts if credits cover everything | Model line Cohyric pays from month one if credits exclude Claude |
+| ---: | ---: | --- | ---: |
+| 50 | $7.29 | 100 ÷ 7.29 = 13.7 | $2.19 |
+| 200 | $14.10 | 100 ÷ 14.10 = 7.1 | $8.78 |
+| 1,000 | $50.41 | 100 ÷ 50.41 = 2.0 | $43.89 |
+
+**The catch.** AWS's credit terms say credits are not applied to AWS Marketplace charges unless AWS authorizes it [8]. Both Claude models are billed through AWS Marketplace [4][5]. So the credits may not cover the model line, which is the last column. They would still cover the knowledge base and storage, about $5.10 to $6.52 a month. Check the credit's list of applicable products in the AWS Billing console before relying on it. Amazon Nova Pro's model card does not mention Marketplace billing [9], so it is the fallback if the credits must cover everything. Credits also expire on a date set when they are issued, and they do not pay tax [8].
+
 ## 4. Model choice
 
-All three are in the Bedrock catalog. Prices are the "Geo and in-region" rates, which keep Tad's data on US servers, and are the same in N. Virginia and Oregon [1]. The last two columns use the expected case from section 2.
+All three are in the Bedrock catalog. Prices are the "Geo and in-region" rates, which keep Tad's data on US servers as decided, and are the same in N. Virginia and Oregon [1]. The last two columns use the expected case from section 2.
 
 | Model | Input per 1M | Output per 1M | Per change order | 1,000 a month |
 | --- | ---: | ---: | ---: | ---: |
@@ -100,7 +116,9 @@ If we build the knowledge base ourselves instead (self-managed), the pieces are 
 | Tier | What Tad sends | What it is for | AI cost |
 | --- | --- | --- | --- |
 | Minimum (proof of concept) | A handful of original proposals with their change orders: request, final proposal, revisions, approval, final amounts, dates | Show that the AI flags out-of-scope work correctly and lands in the right cost range, and measure real token counts | Under 1 GB: about $5 a month plus cents per test run |
-| Full ("full training") | Many more of the same, plus cost breakdowns: labor hours and rates, materials, equipment, quotes, permits, overhead, markup, tax | Estimates accurate enough for the estimator to rely on | Assumed 5 GB: about $25 a month for storage |
+| Full ("full training") | Many more of the same, plus cost breakdowns: labor hours and rates, materials, equipment, quotes, permits, overhead, markup, tax | Estimates accurate enough for the estimator to rely on | Grows with the data: $5.02 a month per GB, so 5 GB is about $25 a month |
+
+We start with the minimum tier and add data as needed.
 
 "Training" here means loading the documents into the knowledge base so the model can look them up. It does not mean retraining the model (fine-tuning). The spec leaves that open and proposes starting with the knowledge base. Fine-tuning is priced differently: for Amazon Nova Pro it is $0.008 per 1,000 training tokens plus $1.95 a month to store the model [1], so 30M tokens over 3 passes would be 90,000 × $0.008 = $720 one time. A fine-tuning price for the Claude 5.5 models is not verified: none is listed on the pricing page [1].
 
@@ -108,13 +126,13 @@ If we build the knowledge base ourselves instead (self-managed), the pieces are 
 
 - **Real document sizes.** The original proposal is the largest input. If Tad's proposals run 25 pages instead of 6, input per run goes from 9,300 to 22,600 tokens. Measure this in the proof of concept.
 - **Re-runs.** Every re-ask after an edit is another full run.
-- **Data volume.** Storage is about $5.02 per GB per month and is most of the bill at 50 and 200 change orders a month.
+- **Data volume.** Storage is about $5.02 per GB per month. At 1 GB it is most of the bill at 50 change orders a month; above that the model is.
 - **The model.** Haiku 5.5 is 5% of Sonnet's model cost. One tier up, Claude Opus 5.5 at $4.40 and $22.00 [1], is double.
 - **The vector store.** Classic OpenSearch Serverless would add $175 to $350 a month of fixed cost.
 - **Fine-tuning instead of lookup**, or **sending photos to the AI**. Both are outside this budget and the spec excludes photos for now.
-- **Routing.** Letting AWS use servers worldwide is about 10% cheaper ($2.00 and $10.00 for Sonnet 5.5 [1]), but Tad's data would leave the US.
+- **Routing.** Decided: US servers only. Worldwide routing would be about 10% cheaper ($2.00 and $10.00 for Sonnet 5.5 [1]) but is ruled out because Tad's data would leave the US.
 - **Very long prompts on Haiku 5.5.** Above 100,000 input tokens the price is five times higher [1][4]. Our high case is 29,700.
-- **How we pay.** Claude models are billed through AWS Marketplace, not as Amazon Bedrock [4][5]. Whether AWS credits cover that is not verified.
+- **How we pay.** If the $100 of AWS credits does not cover Marketplace-billed Claude models, Cohyric pays the model line from the first month. See [Who pays](#who-pays).
 - **Price changes.** AWS changed a Sonnet 5.5 rate as recently as Oct 7, 2026 [1]. Re-check before committing a budget.
 
 ## Not verified
@@ -124,12 +142,13 @@ If we build the knowledge base ourselves instead (self-managed), the pieces are 
 - Whether Claude's reasoning is billed as output tokens.
 - Whether knowledge-base index storage is rounded up to a whole GB.
 - A fine-tuning price for Claude 5.5 models.
-- Whether AWS credits cover Marketplace-billed models.
+- Whether our AWS credits cover the Claude models. The general credit terms exclude AWS Marketplace charges unless AWS authorizes them [8], and I have not seen the terms of our specific credit or its expiry date.
+- The 1.5 runs per change order. Agreed as the working figure until tested on Tad's data.
 - That the Managed Knowledge Base is offered in the region we will use. The pricing page does not list regions for it.
 
 ## Sources
 
-All read Nov 11, 2026.
+Sources 1 to 7 read Nov 11, 2026. Sources 8 and 9 read Nov 13, 2026.
 
 1. Amazon Bedrock pricing: https://aws.amazon.com/bedrock/pricing/ (model prices, Titan embeddings, Managed Knowledge Base, Nova fine-tuning)
 2. Amazon S3 pricing: https://aws.amazon.com/s3/pricing/ (S3 Standard storage, S3 Vectors)
@@ -138,5 +157,7 @@ All read Nov 11, 2026.
 5. Claude Sonnet 5.5 model card: https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5-5.html
 6. Knowledge base chunking: https://docs.aws.amazon.com/bedrock/latest/userguide/kb-chunking.html
 7. Knowledge base vector stores: https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-setup.html
+8. AWS Promotional Credit terms (last updated Sep 24, 2026): https://aws.amazon.com/awscredits/
+9. Amazon Nova Pro model card: https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-pro.html
 
 How the prices were read: the pricing pages fill in their Amazon, Anthropic, S3 and OpenSearch tables in the browser from AWS's own price files (under `https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/`). I downloaded the pages and those files and matched them up for US East (N. Virginia), and for US West (Oregon) on the Bedrock page. Both regions gave the same model prices. A quick spot-check of the three model rows in a browser is worthwhile before this goes to Con.
