@@ -35,20 +35,15 @@ export function SettingsScreen() {
 
   return (
     <AppShell title="Settings">
-      <PageHeading
-        eyebrow="MAKE THE WORKSPACE YOURS"
-        title="Workspace settings"
-        description="Preview the people and steps behind a smooth approval."
-      />
+      <PageHeading title="Workspace settings" />
       <View className="flex-col gap-5 xl:flex-row">
         <View className="min-w-0 flex-1 gap-5">
           <Card className="p-5 lg:p-6">
-            <SectionTitle title="Preview role" />
+            <SectionTitle title="Workspace preview" />
             <Text className="mb-5 text-[12px] leading-5 text-muted">
-              Switch perspectives to demonstrate the work order workflow. These
-              preview roles do not sign you into a real account.
+              Choose a role for this preview session.
             </Text>
-            <View className="gap-3">
+            <View accessibilityRole="radiogroup" className="gap-3">
               {(Object.keys(roles) as Role[]).map((key) => (
                 <Pressable
                   key={key}
@@ -74,7 +69,7 @@ export function SettingsScreen() {
           </Card>
           <Card className="p-5 lg:p-6">
             <SectionTitle title="Submission mode" />
-            <View className="gap-3">
+            <View accessibilityRole="radiogroup" className="gap-3">
               {(["demo", "connected"] as Mode[]).map((value) => (
                 <Pressable
                   key={value}
@@ -93,8 +88,8 @@ export function SettingsScreen() {
                     </Text>
                     <Text className="mt-1.5 text-[11px] leading-[18px] text-muted">
                       {value === "demo"
-                        ? "Use sample projects and local requests. Photo selection, office review, and client decisions work without a server."
-                        : "Upload new photos and descriptions to your running API. Reviews and decisions for those requests use the existing API routes."}
+                        ? "Use sample projects and local requests. Reporting, review, and decisions run in this session."
+                        : "Share reports, photos, estimates, and approvals through your running API. Approved changes automatically update the project work order."}
                     </Text>
                   </View>
                   {mode === value && <Check size={15} color="#23664D" />}
@@ -102,9 +97,9 @@ export function SettingsScreen() {
               ))}
             </View>
             <Text className="mt-4 text-[10px] leading-4 text-muted">
-              Project names, titles, estimates, and schedule details are
-              presentation data in both modes. They stay in this session; only
-              the existing description, priority, and photo fields are uploaded.
+              Connected mode saves project links, titles, photos, estimates, and
+              decisions on the server and refreshes this workspace
+              automatically. Demo changes stay in this session.
             </Text>
           </Card>
         </View>
@@ -132,7 +127,7 @@ export function SettingsScreen() {
           <Card className="p-5">
             <ShieldCheck size={23} color="#7B9A70" />
             <Text className="mb-2 mt-3 text-[13px] font-semibold text-ink">
-              A safe space to demonstrate.
+              Demo notifications
             </Text>
             <Text className="text-[11px] leading-5 text-muted">
               The default demo uses sample records. Activity updates remain

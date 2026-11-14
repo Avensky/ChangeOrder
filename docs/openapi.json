@@ -28,7 +28,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChangeOut"
+                  "$ref": "#/components/schemas/WorkspaceChangeOut"
                 }
               }
             }
@@ -77,7 +77,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/ChangeOut"
+                    "$ref": "#/components/schemas/WorkspaceChangeOut"
                   },
                   "title": "Response List Changes Api V1 Changes Get"
                 }
@@ -115,6 +115,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTerms"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -161,7 +171,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChangeOut"
+                  "$ref": "#/components/schemas/WorkspaceChangeOut"
                 }
               }
             }
@@ -299,6 +309,103 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/work-order": {
+      "get": {
+        "tags": [
+          "changes"
+        ],
+        "summary": "Project Work Order",
+        "operationId": "project_work_order_api_v1_projects__project_id__work_order_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "north-park",
+                "harbor",
+                "cedar"
+              ],
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/changes/{change_id}/suggestion": {
+      "post": {
+        "tags": [
+          "changes"
+        ],
+        "summary": "Suggest",
+        "operationId": "suggest_api_v1_changes__change_id__suggestion_post",
+        "parameters": [
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Suggestion"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -335,57 +442,46 @@
             "$ref": "#/components/schemas/Severity",
             "default": "normal"
           },
-          "photo": {
+          "photos": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Photos"
+          },
+          "title": {
             "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "Photo"
+            "maxLength": 120,
+            "title": "Title",
+            "default": ""
+          },
+          "project_id": {
+            "type": "string",
+            "enum": [
+              "north-park",
+              "harbor",
+              "cedar"
+            ],
+            "title": "Project Id",
+            "default": "north-park"
+          },
+          "submitted_by": {
+            "type": "string",
+            "enum": [
+              "contractor",
+              "subcontractor"
+            ],
+            "title": "Submitted By",
+            "default": "contractor"
           }
         },
         "type": "object",
         "required": [
           "description",
-          "photo"
+          "photos"
         ],
         "title": "Body_submit_change_api_v1_changes_post"
-      },
-      "ChangeOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Description"
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity"
-          },
-          "status": {
-            "$ref": "#/components/schemas/Status"
-          },
-          "photo_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Photo Key"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "description",
-          "severity",
-          "status"
-        ],
-        "title": "ChangeOut"
       },
       "HTTPValidationError": {
         "properties": {
@@ -414,6 +510,80 @@
         ],
         "title": "HealthResponse"
       },
+      "HistoryEvent": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "changeId": {
+            "type": "string",
+            "title": "Changeid"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "person": {
+            "type": "string",
+            "title": "Person"
+          },
+          "time": {
+            "type": "string",
+            "title": "Time"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "changeId",
+          "title",
+          "person",
+          "time",
+          "kind"
+        ],
+        "title": "HistoryEvent"
+      },
+      "ReviewTerms": {
+        "properties": {
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "amount": {
+            "type": "number",
+            "multipleOf": 0.01,
+            "maximum": 100000000.0,
+            "minimum": 0.0,
+            "title": "Amount"
+          },
+          "impact_days": {
+            "type": "integer",
+            "maximum": 3650.0,
+            "minimum": 0.0,
+            "title": "Impact Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount",
+          "impact_days"
+        ],
+        "title": "ReviewTerms"
+      },
       "Severity": {
         "type": "string",
         "enum": [
@@ -431,6 +601,63 @@
           "rejected"
         ],
         "title": "Status"
+      },
+      "Suggestion": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Scope"
+          },
+          "amount": {
+            "type": "number",
+            "multipleOf": 0.01,
+            "maximum": 100000000.0,
+            "minimum": 0.0,
+            "title": "Amount"
+          },
+          "impact_days": {
+            "type": "integer",
+            "maximum": 3650.0,
+            "minimum": 0.0,
+            "title": "Impact Days"
+          },
+          "rationale": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Rationale"
+          },
+          "in_scope": {
+            "type": "boolean",
+            "title": "In Scope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "amount",
+          "impact_days",
+          "rationale",
+          "in_scope"
+        ],
+        "title": "Suggestion"
+      },
+      "SuggestionRequest": {
+        "properties": {
+          "original_scope": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 10,
+            "title": "Original Scope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "original_scope"
+        ],
+        "title": "SuggestionRequest"
       },
       "ValidationError": {
         "properties": {
@@ -471,6 +698,115 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkspaceChangeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "photo_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Photo Keys"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "submitted_by": {
+            "type": "string",
+            "title": "Submitted By"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "impact_days": {
+            "type": "integer",
+            "title": "Impact Days"
+          },
+          "sent_for_approval": {
+            "type": "boolean",
+            "title": "Sent For Approval"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryEvent"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "suggestion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Suggestion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approved_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved Scope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "description",
+          "severity",
+          "status",
+          "code",
+          "title",
+          "project_id",
+          "submitted_by",
+          "author",
+          "created_at",
+          "amount",
+          "impact_days",
+          "sent_for_approval",
+          "history"
+        ],
+        "title": "WorkspaceChangeOut"
       }
     }
   }

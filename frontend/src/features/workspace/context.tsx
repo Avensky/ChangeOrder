@@ -1,8 +1,15 @@
 import type { ImagePickerAsset } from "expo-image-picker";
-import { createContext, type ReactNode, useContext, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { submitChange } from "@/features/change-orders/api";
-import type { Severity } from "@/features/change-orders/types";
+import type { ChangeOrder, Severity } from "@/features/change-orders/types";
 import { API_URL, requestJson } from "@/lib/api";
 
 import {
@@ -11,8 +18,11 @@ import {
   type Mode,
   type Role,
   type WorkspaceChange,
+  canViewChange,
+  isSubmitterRole,
   roles,
   seedChanges,
+  visibleHistory,
 } from "./data";
 
 type NewChange = {
@@ -20,7 +30,7 @@ type NewChange = {
   description: string;
   severity: Severity;
   projectId: string;
-  photo: ImagePickerAsset;
+  photos: ImagePickerAsset[];
 };
 type Workspace = {
   role: Role;
@@ -32,20 +42,105 @@ type Workspace = {
   unread: number;
   markRead: () => void;
   create: (input: NewChange) => Promise<WorkspaceChange>;
-  review: (id: string, amount: number, days: number) => Promise<void>;
+  review: (
+    id: string,
+    amount: number,
+    days: number,
+    scope: string,
+  ) => Promise<void>;
   decide: (id: string, approved: boolean) => Promise<void>;
   reset: () => void;
+  syncError: string;
+  refresh: () => Promise<void>;
 };
 const WorkspaceContext = createContext<Workspace | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role>("office");
-  const [mode, setMode] = useState<Mode>("demo");
+  const [mode, setMode] = useState<Mode>(API_URL ? "connected" : "demo");
   const [changes, setChanges] = useState(seedChanges);
-  const [unread, setUnread] = useState(3);
-  const events = changes
-    .flatMap((change) => change.history)
+  const [syncError, setSyncError] = useState("");
+  const modeRef = useRef(mode);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+  const syncSequence = useRef(0);
+  function fromServer(c: ChangeOrder): WorkspaceChange {
+    const photoUris = c.photo_keys.map(
+      (key) => API_URL + "/uploads/" + encodeURIComponent(key),
+    );
+    return {
+      id: c.id,
+      code: c.code,
+      title: c.title,
+      description: c.description,
+      projectId: c.project_id,
+      severity: c.severity,
+      status: c.status,
+      amount: c.amount,
+      approvedScope: c.approved_scope,
+      impactDays: c.impact_days,
+      author: roles[c.submitted_by].person,
+      submittedBy: c.submitted_by,
+      sentForApproval: c.sent_for_approval,
+      createdAt: c.created_at,
+      source: "connected",
+      photoUri: photoUris[0],
+      photoUris,
+      history: c.history,
+      suggestion: c.suggestion,
+    };
+  }
+  async function refresh() {
+    const sequence = ++syncSequence.current;
+    try {
+      const records = await requestJson<ChangeOrder[]>("/api/v1/changes");
+      if (
+        modeRef.current === "connected" &&
+        sequence === syncSequence.current
+      ) {
+        setChanges((items) => [
+          ...records.map(fromServer),
+          ...items.filter((c) => c.source === "demo"),
+        ]);
+        setSyncError("");
+      }
+    } catch (cause) {
+      if (modeRef.current === "connected" && sequence === syncSequence.current)
+        setSyncError(
+          cause instanceof Error
+            ? cause.message
+            : "Could not refresh workspace.",
+        );
+    }
+  }
+  useEffect(() => {
+    if (mode !== "connected") return;
+    const initial = setTimeout(() => {
+      void refresh();
+    }, 0);
+    const timer = setInterval(() => {
+      void refresh();
+    }, 5000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(timer);
+    };
+    // refresh deliberately reads the current mode through modeRef.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+  const [readEvents, setReadEvents] = useState<
+    Partial<Record<Role, Set<string>>>
+  >({});
+  const visibleChanges = changes.filter(
+    (change) => change.source === mode && canViewChange(role, change),
+  );
+  const events = visibleChanges
+    .flatMap((change) => visibleHistory(role, change))
     .sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
+  const unread = events.filter(
+    (event) => !readEvents[role]?.has(event.id),
+  ).length;
 
   function update(
     id: string,
@@ -54,7 +149,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     extras: Partial<WorkspaceChange> = {},
   ) {
     const event: Event = {
-      id: "event-" + Date.now(),
+      id: `${id}-${status}`,
       changeId: id,
       title,
       person: roles[role].person,
@@ -73,50 +168,72 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           : change,
       ),
     );
-    setUnread((count) => count + 1);
   }
 
   async function create(input: NewChange) {
-    // Demo submissions stay local. Connected submissions retain the working API upload.
+    if (!isSubmitterRole(role))
+      throw new Error(
+        "Switch to Contractor or Subcontractor to submit a change.",
+      );
+    // Connected mode uses the same upload contract as the existing workspace.
     const result =
       mode === "connected"
-        ? await submitChange(input.description, input.severity, input.photo)
+        ? await submitChange(input.description, input.severity, input.photos, {
+            title: input.title,
+            projectId: input.projectId,
+            submittedBy: role,
+          })
         : null;
-    const id = result?.id ?? "demo-" + Date.now().toString(36);
+    if (result) {
+      const record = fromServer(result);
+      setChanges((items) => [
+        record,
+        ...items.filter((item) => item.id !== record.id),
+      ]);
+      return record;
+    }
+    const id = "demo-" + Date.now().toString(36);
     const time = new Date().toISOString();
     const record: WorkspaceChange = {
       id,
       code: "CO-" + (1049 + Math.max(0, changes.length - 8)),
       title: input.title.trim(),
-      description: result?.description ?? input.description.trim(),
+      description: input.description.trim(),
       projectId: input.projectId,
       severity: input.severity,
-      status: result?.status ?? "submitted",
+      status: "submitted",
       amount: 0,
       impactDays: 0,
-      author: roles.field.person,
+      author: roles[role].person,
+      submittedBy: role,
+      sentForApproval: false,
       createdAt: time,
       source: mode,
-      photoUri: result?.photo_key
-        ? API_URL + "/uploads/" + result.photo_key
-        : input.photo.uri,
+      photoUri: input.photos[0].uri,
+      photoUris: input.photos.map((photo) => photo.uri),
       history: [
         {
           id: id + "-submitted",
           changeId: id,
           title: "Change request submitted",
-          person: roles.field.person,
+          person: roles[role].person,
           time,
           kind: "submitted",
         },
       ],
     };
     setChanges((items) => [record, ...items]);
-    setUnread((count) => count + 1);
     return record;
   }
 
-  async function review(id: string, amount: number, days: number) {
+  async function review(
+    id: string,
+    amount: number,
+    days: number,
+    scope: string,
+  ) {
+    if (role !== "office")
+      throw new Error("Switch to Office Manager to review a change.");
     const record = changes.find((change) => change.id === id);
     if (!record || record.status !== "submitted")
       throw new Error("This request has already been reviewed.");
@@ -125,23 +242,36 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (record.source === "connected") {
       const result = await requestJson<{ status: ChangeStatus }>(
         "/api/v1/changes/" + encodeURIComponent(id) + "/admin-approve",
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount, impact_days: days, scope }),
+        },
       );
       status = result.status;
+      await refresh();
+      return;
     }
     update(
       id,
       status,
       status === "approved"
-        ? "Urgent change approved by office"
-        : "Sent to client for approval",
-      { amount, impactDays: days },
+        ? "Urgent change approved by Office Manager"
+        : "Sent to approver",
+      {
+        amount,
+        impactDays: days,
+        approvedScope: scope,
+        sentForApproval: status === "awaiting_client",
+      },
     );
   }
 
   async function decide(id: string, approved: boolean) {
+    if (role !== "approver")
+      throw new Error("Switch to Approver to record a decision.");
     const record = changes.find((change) => change.id === id);
-    if (!record || record.status !== "awaiting_client")
+    if (!record?.sentForApproval || record.status !== "awaiting_client")
       throw new Error("This request is no longer awaiting a decision.");
     if (record.source === "connected") {
       const notices = await requestJson<{ change_id: string; msg: string }[]>(
@@ -151,8 +281,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         .filter((notice) => notice.change_id === id)
         .at(-1)?.msg;
       const token = link ? new URL(link).searchParams.get("token") : null;
-      if (!token)
-        throw new Error("The client approval link could not be found.");
+      if (!token) throw new Error("The approval link could not be found.");
       await requestJson(
         "/api/v1/approval-session/" +
           (approved ? "approve" : "decline") +
@@ -161,16 +290,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         { method: "POST" },
       );
     }
+    if (record.source === "connected") {
+      await refresh();
+      return;
+    }
     update(
       id,
       approved ? "approved" : "rejected",
-      approved ? "Change approved by client" : "Change declined by client",
+      approved ? "Change approved" : "Change declined",
     );
   }
 
   function reset() {
     setChanges(seedChanges());
-    setUnread(3);
+    setReadEvents({});
     setMode("demo");
     setRole("office");
   }
@@ -182,14 +315,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setRole,
         mode,
         setMode,
-        changes,
+        changes: visibleChanges,
         events,
         unread,
-        markRead: () => setUnread(0),
+        markRead: () =>
+          setReadEvents((current) => ({
+            ...current,
+            [role]: new Set(events.map((event) => event.id)),
+          })),
         create,
         review,
         decide,
         reset,
+        syncError,
+        refresh,
       }}
     >
       {children}

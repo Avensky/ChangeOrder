@@ -1,19 +1,19 @@
 import { type Href, router, usePathname } from "expo-router";
 import {
   Activity,
-  ArrowUpRight,
   Bell,
   Building2,
+  Check,
   ChevronDown,
   ChevronRight,
+  ClipboardCheck,
   ClipboardList,
-  HelpCircle,
   LayoutDashboard,
   Plus,
   Search,
   Settings2,
-  ShieldCheck,
   X,
+  type LucideIcon,
 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import {
@@ -28,17 +28,82 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useWorkspace } from "./context";
 import { roles, type Role } from "./data";
-import { Avatar, Button, Card } from "./ui";
+import { Avatar, Card } from "./ui";
 
 export const go = (path: string) => router.push(path as Href);
 export const openChange = (id: string) =>
   go("/changes/" + encodeURIComponent(id));
-const navigation = [
-  { path: "/", title: "Overview", icon: LayoutDashboard },
-  { path: "/requests", title: "Change requests", icon: ClipboardList },
-  { path: "/projects", title: "Projects", icon: Building2 },
-  { path: "/activity", title: "Activity", icon: Activity },
+const navigationIcons = {
+  "/": LayoutDashboard,
+  "/requests": ClipboardList,
+  "/projects": Building2,
+  "/activity": Activity,
+};
+
+type NavigationItem = readonly [
+  path: keyof typeof navigationIcons,
+  title: string,
+  mobileTitle: string,
 ];
+
+const roleNavigation: Record<
+  Role,
+  {
+    links: readonly NavigationItem[];
+    action: { path: string; title: string; icon: LucideIcon };
+  }
+> = {
+  contractor: {
+    links: [
+      ["/", "Job overview", "Overview"],
+      ["/requests", "Team requests", "Requests"],
+      ["/projects", "Projects", "Projects"],
+      ["/activity", "Team activity", "Activity"],
+    ],
+    action: { path: "/new", title: "New change request", icon: Plus },
+  },
+  subcontractor: {
+    links: [
+      ["/", "Field overview", "Field"],
+      ["/requests", "My submissions", "My requests"],
+      ["/projects", "Job sites", "Sites"],
+      ["/activity", "My updates", "Updates"],
+    ],
+    action: { path: "/new", title: "Report site change", icon: Plus },
+  },
+  office: {
+    links: [
+      ["/", "Operations", "Office"],
+      ["/requests", "Review queue", "Review"],
+      ["/projects", "Projects", "Projects"],
+      ["/activity", "Review activity", "Activity"],
+    ],
+    action: {
+      path: "/requests?status=submitted",
+      title: "Review submissions",
+      icon: ClipboardCheck,
+    },
+  },
+  approver: {
+    links: [
+      ["/", "Approvals", "Overview"],
+      ["/requests", "Decision queue", "Decisions"],
+      ["/activity", "Decision activity", "Activity"],
+    ],
+    action: {
+      path: "/requests?status=awaiting_client",
+      title: "Review proposals",
+      icon: ClipboardCheck,
+    },
+  },
+};
+
+function isActiveRoute(pathname: string, path: NavigationItem[0]) {
+  return (
+    pathname === path ||
+    (path === "/requests" && pathname.startsWith("/changes/"))
+  );
+}
 
 export function AppShell({
   children,
@@ -49,14 +114,17 @@ export function AppShell({
 }) {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
-  const { role, setRole, mode, unread, changes } = useWorkspace();
-  const [panel, setPanel] = useState<"role" | "help" | null>(null);
+  const { role, setRole, mode, unread, changes, syncError, refresh } =
+    useWorkspace();
+  const [showRolePicker, setShowRolePicker] = useState(false);
   const [search, setSearch] = useState("");
   const profile = roles[role];
-  const pending = changes.filter(
-    (change) =>
-      change.status === "submitted" || change.status === "awaiting_client",
-  ).length;
+  const { links, action } = roleNavigation[role];
+  const pending = changes.filter(({ status }) => {
+    if (role === "office") return status === "submitted";
+    if (role === "approver") return status === "awaiting_client";
+    return status === "submitted" || status === "awaiting_client";
+  }).length;
 
   return (
     <View
@@ -79,7 +147,7 @@ export function AppShell({
               Aven Construction
             </Text>
             <Text className="mt-1 text-[10px] text-[#A5B8AB]">
-              Team workspace
+              {profile.label} workspace
             </Text>
           </View>
         </View>
@@ -87,20 +155,19 @@ export function AppShell({
           WORKSPACE
         </Text>
         <View className="gap-1.5">
-          {navigation.map((item) => {
-            const active =
-              item.path === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.path);
+          {links.map(([path, label]) => {
+            const active = isActiveRoute(pathname, path);
+            const Icon = navigationIcons[path];
             return (
               <Pressable
-                key={item.path}
+                key={path}
                 accessibilityRole="button"
-                accessibilityLabel={item.title}
-                onPress={() => go(item.path)}
+                accessibilityLabel={label}
+                accessibilityState={{ selected: active }}
+                onPress={() => go(path)}
                 className={`min-h-[44px] flex-row items-center gap-3 rounded-xl px-3 ${active ? "bg-[#2B4D3C]" : "hover:bg-[#203E31]"}`}
               >
-                <item.icon
+                <Icon
                   size={17}
                   color={active ? "#E4F3DE" : "#A6BCAD"}
                   strokeWidth={1.7}
@@ -108,9 +175,9 @@ export function AppShell({
                 <Text
                   className={`flex-1 text-[12px] ${active ? "font-semibold text-white" : "text-[#B4C6B9]"}`}
                 >
-                  {item.title}
+                  {label}
                 </Text>
-                {item.path === "/requests" && (
+                {path === "/requests" && pending > 0 && (
                   <View className="rounded-md bg-[#3B5A45] px-1.5 py-0.5">
                     <Text className="text-[9px] font-semibold text-[#D3E5CD]">
                       {pending}
@@ -122,30 +189,21 @@ export function AppShell({
           })}
         </View>
         <View className="mt-auto gap-4">
-          <View className="rounded-2xl border border-[#345044] bg-[#1C392D] p-4">
-            <View className="mb-3 h-8 w-8 items-center justify-center rounded-lg bg-[#385640]">
-              <ShieldCheck size={17} color="#C4D8AD" />
-            </View>
-            <Text className="text-[12px] font-semibold text-[#E4EFDF]">
-              From field to final approval.
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={action.title}
+            onPress={() => go(action.path)}
+            className="min-h-[44px] flex-row items-center gap-2.5 rounded-xl bg-[#C4D5AB] px-3 hover:bg-[#D4E1C4] active:opacity-80"
+          >
+            <action.icon size={17} color="#254A33" strokeWidth={1.8} />
+            <Text className="text-[12px] font-semibold text-[#254A33]">
+              {action.title}
             </Text>
-            <Text className="mb-3 mt-2 text-[10px] leading-[17px] text-[#A3B7A7]">
-              Walk through the workflow by switching your preview role.
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setPanel("help")}
-              className="flex-row items-center gap-2 py-1"
-            >
-              <Text className="text-[10px] font-semibold text-[#C9DABD]">
-                Explore the demo
-              </Text>
-              <ArrowUpRight size={12} color="#C9DABD" />
-            </Pressable>
-          </View>
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Settings"
+            accessibilityState={{ selected: pathname === "/settings" }}
             onPress={() => go("/settings")}
             className="flex-row items-center gap-3 rounded-xl px-3 py-3 hover:bg-[#203E31]"
           >
@@ -153,7 +211,12 @@ export function AppShell({
             <Text className="text-[12px] text-[#B4C6B9]">Settings</Text>
           </Pressable>
           <View className="border-t border-[#345044] pt-4">
-            <View className="flex-row items-center gap-3 px-2">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Switch workspace preview"
+              onPress={() => setShowRolePicker(true)}
+              className="min-h-[44px] flex-row items-center gap-3 rounded-xl px-2 hover:bg-[#203E31]"
+            >
               <Avatar name={profile.person} />
               <View className="flex-1">
                 <Text className="text-[11px] font-semibold text-white">
@@ -163,14 +226,8 @@ export function AppShell({
                   {profile.label}
                 </Text>
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Help with demo"
-                onPress={() => setPanel("help")}
-              >
-                <HelpCircle size={16} color="#8BA592" />
-              </Pressable>
-            </View>
+              <ChevronDown size={14} color="#A5B8AB" />
+            </Pressable>
           </View>
         </View>
       </View>
@@ -184,12 +241,12 @@ export function AppShell({
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Overview"
+            accessibilityLabel="Workspace home"
             onPress={() => go("/")}
             className="flex-row items-center gap-2 lg:hidden"
           >
             <BrandMark small />
-            <Text className="text-[15px] font-bold tracking-[-0.5px] text-ink">
+            <Text className="hidden text-[15px] font-bold tracking-[-0.5px] text-ink sm:flex">
               ChangeOrder.
             </Text>
           </Pressable>
@@ -197,7 +254,7 @@ export function AppShell({
             <View className="hidden w-[190px] flex-row items-center gap-2 xl:flex">
               <Search size={15} color="#8D9B91" />
               <TextInput
-                accessibilityLabel="Search all requests"
+                accessibilityLabel="Search workspace requests"
                 value={search}
                 onChangeText={setSearch}
                 onSubmitEditing={() =>
@@ -220,16 +277,12 @@ export function AppShell({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Preview role"
-              onPress={() => setPanel("role")}
-              className="min-h-[40px] flex-row items-center gap-2 rounded-lg bg-canvas px-2.5"
+              accessibilityState={{ expanded: showRolePicker }}
+              onPress={() => setShowRolePicker(true)}
+              className="min-h-[44px] flex-row items-center gap-2 rounded-lg bg-canvas px-2.5"
             >
               <Text className="text-[10px] font-semibold text-ink">
-                {role === "office"
-                  ? "Office"
-                  : role === "field"
-                    ? "Field"
-                    : "Client"}{" "}
-                preview
+                {profile.label} preview
               </Text>
               <ChevronDown size={12} color="#74827C" />
             </Pressable>
@@ -237,7 +290,7 @@ export function AppShell({
               accessibilityRole="button"
               accessibilityLabel="Notifications"
               onPress={() => go("/activity")}
-              className="relative min-h-[40px] min-w-[28px] items-center justify-center"
+              className="relative min-h-[44px] min-w-[44px] items-center justify-center"
             >
               <Bell size={19} color="#64766A" strokeWidth={1.6} />
               {unread > 0 && (
@@ -257,6 +310,26 @@ export function AppShell({
           }}
         >
           <View className="mx-auto w-full max-w-[1480px] px-5 pb-28 pt-7 lg:px-8 lg:pb-4 lg:pt-8">
+            {mode === "connected" && !!syncError && (
+              <View className="mb-4 rounded-xl bg-red-50 p-4">
+                <Text
+                  accessibilityRole="alert"
+                  className="mb-2 text-[12px] text-red-700"
+                >
+                  {syncError}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    void refresh();
+                  }}
+                >
+                  <Text className="font-semibold text-forest">
+                    Retry refresh
+                  </Text>
+                </Pressable>
+              </View>
+            )}
             {children}
           </View>
         </ScrollView>
@@ -265,20 +338,19 @@ export function AppShell({
           className="absolute bottom-0 left-0 right-0 flex-row border-t border-line bg-white px-1 pt-2 lg:hidden"
           style={{ paddingBottom: Math.max(insets.bottom, 12) }}
         >
-          {navigation.map((item) => {
-            const active =
-              item.path === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.path);
+          {links.map(([path, label, mobileLabel]) => {
+            const active = isActiveRoute(pathname, path);
+            const Icon = navigationIcons[path];
             return (
               <Pressable
-                key={item.path}
+                key={path}
                 accessibilityRole="button"
-                accessibilityLabel={item.title}
-                onPress={() => go(item.path)}
+                accessibilityLabel={label}
+                accessibilityState={{ selected: active }}
+                onPress={() => go(path)}
                 className="min-h-[48px] flex-1 items-center gap-1.5"
               >
-                <item.icon
+                <Icon
                   size={19}
                   color={active ? "#23664D" : "#8B9B90"}
                   strokeWidth={active ? 2 : 1.6}
@@ -286,7 +358,7 @@ export function AppShell({
                 <Text
                   className={`text-[9px] ${active ? "font-semibold text-forest" : "text-muted"}`}
                 >
-                  {item.path === "/requests" ? "Requests" : item.title}
+                  {mobileLabel}
                 </Text>
               </Pressable>
             );
@@ -294,86 +366,88 @@ export function AppShell({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Settings"
+            accessibilityState={{ selected: pathname === "/settings" }}
             onPress={() => go("/settings")}
             className="min-h-[48px] flex-1 items-center gap-1.5"
           >
-            <Settings2 size={19} color="#8B9B90" />
-            <Text className="text-[9px] text-muted">Settings</Text>
+            <Settings2
+              size={19}
+              color={pathname === "/settings" ? "#23664D" : "#8B9B90"}
+            />
+            <Text
+              className={`text-[9px] ${pathname === "/settings" ? "font-semibold text-forest" : "text-muted"}`}
+            >
+              Settings
+            </Text>
           </Pressable>
         </View>
       </View>
 
       <Modal
-        visible={panel !== null}
+        visible={showRolePicker}
         transparent
         animationType="fade"
-        onRequestClose={() => setPanel(null)}
+        onRequestClose={() => setShowRolePicker(false)}
       >
-        <View className="flex-1 items-center justify-center px-5">
+        <View className="flex-1 items-center justify-center px-5 py-5">
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close dialog"
             className="absolute inset-0 bg-black/35"
-            onPress={() => setPanel(null)}
+            onPress={() => setShowRolePicker(false)}
           />
-          <Card className="w-full max-w-[420px] p-6">
-            <View className="mb-2 flex-row items-center justify-between">
-              <Text className="text-[20px] font-bold text-ink">
-                {panel === "role"
-                  ? "See every side of a change."
-                  : "One change. Three perspectives."}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-                onPress={() => setPanel(null)}
-                className="p-1"
-              >
-                <X size={18} color="#74827C" />
-              </Pressable>
-            </View>
-            <Text className="mb-5 text-[12px] leading-5 text-muted">
-              {panel === "role"
-                ? "Switch preview roles to demonstrate the workflow. This is a local preview, not account authentication."
-                : "Create a request as Field, review it as Office, then approve or decline it as Client. Demo requests stay in this workspace."}
-            </Text>
-            <View className="gap-2">
-              {(Object.keys(roles) as Role[]).map((key) => (
-                <Pressable
-                  key={key}
-                  accessibilityRole="button"
-                  accessibilityLabel={"Preview as " + roles[key].label}
-                  onPress={() => {
-                    setRole(key);
-                    setPanel(null);
-                  }}
-                  className={`flex-row items-center gap-3 rounded-xl border p-3 ${role === key ? "border-forest bg-mint" : "border-line bg-white"}`}
+          <Card className="max-h-full w-full max-w-[420px] overflow-hidden">
+            <ScrollView contentContainerClassName="p-5 sm:p-6">
+              <View className="mb-2 flex-row items-center justify-between">
+                <Text
+                  accessibilityRole="header"
+                  className="text-[20px] font-bold text-ink"
                 >
-                  <Avatar name={roles[key].person} size={36} />
-                  <View className="flex-1">
-                    <Text className="text-[12px] font-semibold text-ink">
-                      {roles[key].label}
-                    </Text>
-                    <Text className="mt-1 text-[10px] text-muted">
-                      {roles[key].caption}
-                    </Text>
-                  </View>
-                  <ChevronRight size={15} color="#74827C" />
+                  Preview a workspace
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  onPress={() => setShowRolePicker(false)}
+                  className="h-11 w-11 items-center justify-center rounded-lg hover:bg-canvas"
+                >
+                  <X size={18} color="#74827C" />
                 </Pressable>
-              ))}
-            </View>
-            <View className="mt-4">
-              <Button
-                variant="quiet"
-                onPress={() => {
-                  setPanel(null);
-                  go("/new");
-                }}
-                icon={Plus}
-              >
-                Create a change request
-              </Button>
-            </View>
+              </View>
+              <Text className="mb-4 text-[12px] leading-5 text-muted">
+                Roles here apply to this preview session.
+              </Text>
+              <View className="gap-2">
+                {(Object.keys(roles) as Role[]).map((key) => (
+                  <Pressable
+                    key={key}
+                    accessibilityRole="button"
+                    accessibilityLabel={"Preview as " + roles[key].label}
+                    accessibilityState={{ selected: role === key }}
+                    onPress={() => {
+                      setRole(key);
+                      setShowRolePicker(false);
+                    }}
+                    className={`flex-row items-center gap-3 rounded-xl border p-3 ${role === key ? "border-forest bg-mint" : "border-line bg-white"}`}
+                  >
+                    <Avatar name={roles[key].person} size={36} />
+                    <View className="flex-1">
+                      <Text className="text-[12px] font-semibold text-ink">
+                        {roles[key].label}
+                      </Text>
+                      <Text className="mt-1 text-[10px] text-muted">
+                        {roles[key].caption}
+                      </Text>
+                    </View>
+                    {role === key ? (
+                      <Check size={16} color="#23664D" />
+                    ) : (
+                      <ChevronRight size={15} color="#74827C" />
+                    )}
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
           </Card>
         </View>
       </Modal>
