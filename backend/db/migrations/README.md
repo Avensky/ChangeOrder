@@ -1,9 +1,12 @@
 # Database migrations
 
-`SQLModel.metadata.create_all()` creates missing tables but never changes an existing one. The shared Supabase database is changed only by the numbered SQL files in this folder, in order. Only Bona's agents add files here, and only Bona runs them against Supabase.
+`SQLModel.metadata.create_all()` creates missing tables but never changes an existing one. The shared Supabase database is changed only by the numbered SQL files in this folder, in order. Only Bona's agents add files here, and they are run against Supabase only with Bona's go-ahead, after review.
+
+Run them in this order: `0000`, `0001`, `0002`.
 
 | File | What it does |
 | --- | --- |
+| `0000_drop_empty_october_tables.sql` | Drops the three October prototype tables (`change_orders`, `notifications`, `"user"`), and only when all three are there in their October shape and every one is empty. With no `change_orders` table it changes nothing. |
 | `0001_nov3_baseline.sql` | Brings a database to the Nov 3 schema: creates the seven tables in an empty database, or just records the baseline when they already exist. |
 | `0002_schema_v2.sql` | Moves the Nov 3 schema to schema v2, the one in `backend/db/models.py` (task B2). |
 
@@ -13,7 +16,9 @@ Each file runs in one transaction and records itself in the `schema_migration` t
 
 ## Before running
 
-1. Find out what the database holds today. This query only reads:
+A read-only check on Nov 13 found that the Supabase project (PostgreSQL 17) holds only the three October tables, all with 0 rows, and no recorded migrations. So the plan is `0000`, then `0001`, then `0002`. `0000` checks all of that again when it runs.
+
+1. Confirm what the database holds. This query only reads:
 
    ```sql
    SELECT table_name, column_name
@@ -24,17 +29,18 @@ Each file runs in one transaction and records itself in the `schema_migration` t
 
    | What you see | What to do |
    | --- | --- |
-   | No tables | Run `0001`, then `0002`. |
-   | `change_event` with a `contractor_id` column, plus `change_order`, `change_order_revision`, `approval_request`, `approval_decision`, `notifications`, `user` | This is the Nov 3 schema. Run `0001`, then `0002`. |
-   | A `change_orders` table (the October tables) | Stop. `0001` refuses this database. The old tables need a decision first: drop them if they hold only test rows, or write a migration for them. |
+   | Only `change_orders` (8 columns), `notifications` (7 columns) and `user` (4 columns), all empty | The October tables. Run `0000`, `0001`, `0002`. `0000` drops them. |
+   | The October tables, with a row in any of them | Stop. `0000` refuses, and so does `0001`. Decide what to do with the rows first. |
+   | No tables | Run `0000`, `0001`, `0002`. `0000` changes nothing here. |
+   | `change_event` with a `contractor_id` column, plus `change_order`, `change_order_revision`, `approval_request`, `approval_decision`, `notifications`, `user` | This is the Nov 3 schema. Run `0000`, `0001`, `0002`. `0000` changes nothing here and leaves `user` and `notifications` alone. |
    | A `company` table | Schema v2 is already there. Check `SELECT * FROM schema_migration;`. |
 
 2. Take a backup (Supabase dashboard, Database, Backups) or export the tables, if they hold anything worth keeping.
-3. Read the note at the top of `0002_schema_v2.sql`. It lists what happens to existing rows.
+3. Read the note at the top of each file. `0000` lists exactly when it drops the October tables; `0002` lists what happens to existing rows.
 
 ## Running
 
-Paste the whole file into the Supabase SQL editor and run it, one file at a time. With `psql`, use `psql -v ON_ERROR_STOP=1 -f <file>` and take the connection string from your local `.env`; never paste it into a file, a commit, or a chat.
+Paste the whole file into the Supabase SQL editor and run it, one file at a time, in order. With `psql`, use `psql -v ON_ERROR_STOP=1 -f <file>` and take the connection string from your local `.env`; never paste it into a file, a commit, or a chat.
 
 If a file fails, the transaction is rolled back and the database is as it was. Fix the cause and run the file again.
 
@@ -42,7 +48,7 @@ If a file fails, the transaction is rolled back and the database is as it was. F
 
 - Rename the company and the project that old rows were put in: `UPDATE company SET name = '<real name>' WHERE name = 'Default company';` and `UPDATE project SET slug = '<slug>', name = '<real name>' WHERE slug = 'default';`
 - Every old `admin` user is now an `estimator`. Make the right people managers: `UPDATE "user" SET role = 'manager' WHERE id = <id>;`
-- Compare the tables with the models. Both of these should show the v2 columns and `0001` and `0002`:
+- Compare the tables with the models. These should show the v2 columns and the three files `0000`, `0001` and `0002`:
 
   ```sql
   SELECT table_name, column_name, data_type, is_nullable
@@ -62,11 +68,19 @@ If a file fails, the transaction is rolled back and the database is as it was. F
 - Never edit a file that has been applied anywhere. Add the next number.
 - Change `backend/db/models.py` in the same pull request, so the models and the tables stay the same.
 - Wrap the file in `BEGIN; ... COMMIT;`, check the starting state, and end by inserting the file's name into `schema_migration`.
-- No drop, truncate or reset against the shared project outside a reviewed migration.
+- No drop, truncate or reset against the shared project outside a reviewed migration. A migration that drops a table checks first that the table is the one it expects and that it is empty, as `0000` does.
 
 ## How these files were checked
 
-They have not been run against Supabase. They were run against a throwaway in-memory PostgreSQL (PGlite, PostgreSQL 18; the Supabase project may run a different major version) on: an empty database, Nov 3 tables with and without rows, a second run, the October tables, and a failure half way. After `0002`, the columns, constraints and indexes were compared with the ones `create_all()` produces from the v2 models, and they match.
+They have not been run against Supabase. They were run against a throwaway in-memory PostgreSQL (PGlite, PostgreSQL 18; the Supabase project may run a different major version) on:
+
+- the October tables present and empty, which is what Supabase holds: `0000` drops them, `0001` creates the baseline, `0002` gives schema v2
+- the October tables with one row in any one of them: `0000` stops and leaves the tables and the row as they were
+- an empty database, and Nov 3 tables with and without rows: `0000` changes nothing
+- October tables next to newer tables, an October table with an unexpected column, one October table missing, and a view that depends on one: `0000` stops each time
+- a second run of each file, `0001` without `0000` on the October tables, `0002` without `0001`, and a failure half way through `0002`
+
+After `0002`, the columns, constraints and indexes were compared with the ones `create_all()` produces from the v2 models, and they match.
 
 ## From the prototype store to schema v2
 
