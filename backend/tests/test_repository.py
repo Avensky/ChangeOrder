@@ -17,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from db import repository
+from db.repository import default_company_id
 from db.database import _enforce_sqlite_foreign_keys
 from db.models import (
     ApprovalDecision,
@@ -382,6 +383,94 @@ class RepositoryTests(unittest.TestCase):
                 repository.decide(token, "approved")
             with self.assertRaises(repository.NotFound):  # no field user in this company
                 repository.create_change("d", "normal", ["z.png"])
+
+    # the caller as submitter
+    def test_given_field_user_is_the_submitter(self):
+        with Session(self.engine) as s:
+            sub = s.exec(select(User).where(User.name == "Subcontractor")).one().id
+        with repository.atomic(self.cid):
+            change = repository.create_change(
+                "d", "normal", ["by-id.png"], "t", "harbor", "contractor", submitted_by_user_id=sub
+            )
+        self.assertEqual(change["author"], "Subcontractor")
+        with Session(self.engine) as s:
+            self.assertEqual(s.execute(text("SELECT submitted_by_id FROM change_event")).scalar_one(), sub)
+
+    def test_submitter_from_another_company_or_wrong_role_is_refused(self):
+        with Session(self.engine) as s:
+            foreign = User(company_id=self.other_id, role="field", name="Foreign")
+            s.add(foreign)
+            s.commit()
+            foreign_id = foreign.id
+            estimator = s.exec(select(User).where(User.role == "estimator")).one().id
+        with self.assertRaises(repository.NotFound):
+            with repository.atomic(self.cid):
+                repository.create_change("d", "normal", ["x1.png"], submitted_by_user_id=foreign_id)
+        with self.assertRaises(repository.NotFound):
+            with repository.atomic(self.cid):
+                repository.create_change("d", "normal", ["x2.png"], submitted_by_user_id=9999)
+        with self.assertRaises(ValueError):
+            with repository.atomic(self.cid):
+                repository.create_change("d", "normal", ["x3.png"], submitted_by_user_id=estimator)
+        self.assertEqual(self.count(Notification), 0)
+
+    # the GC link fixes the company
+    def seed_other_company(self):
+        with Session(self.engine) as s:
+            s.add_all(
+                [
+                    User(company_id=self.other_id, role="field", name="Other Field"),
+                    User(company_id=self.other_id, role="estimator", name="Other Estimator"),
+                    User(company_id=self.other_id, role="gc", name="Other GC", email="g@example.com"),
+                ]
+            )
+            s.commit()
+
+    def other_change_token(self):
+        self.seed_other_company()
+        with repository.atomic(self.other_id):
+            change = repository.create_change("Other job", "normal", ["other.png"], "T", "north-park")
+            token = repository.send_to_gc(change["id"], None, 50, 1)["token"]
+        return change, token
+
+    def test_link_of_another_company_resolves_without_an_explicit_company(self):
+        change, token = self.other_change_token()
+        mine = self.submit()
+        with unittest_env(WORKSPACE_COMPANY_ID=str(self.cid)):
+            with repository.atomic():  # default company is the first one
+                self.assertEqual(repository.change_for_token(token)["id"], change["id"])
+            with repository.atomic():
+                self.assertEqual(repository.decide(token, "approved"), {"status": "approved"})
+                # later queries in the same transaction use the link's company
+                self.assertEqual(repository.work_order("north-park")["revision"], 1)
+            with self.assertRaises(repository.Conflict):
+                with repository.atomic():
+                    repository.decide(token, "approved")
+        with repository.atomic(self.other_id):
+            self.assertEqual(repository.work_order("north-park")["additional_amount"], 50)
+            self.assertEqual(len(repository.list_notifications("contractor")), 1)
+        # the first company is untouched
+        with repository.atomic(self.cid):
+            self.assertEqual(repository.work_order("north-park")["revision"], 0)
+            self.assertEqual(repository.get_change(mine["id"])["status"], "submitted")
+            self.assertEqual(len(repository.list_changes()), 1)
+            self.assertEqual(repository.list_notifications("contractor"), [])
+
+    def test_explicit_company_still_requires_the_link_to_belong_to_it(self):
+        _change, token = self.other_change_token()
+        with repository.atomic(self.cid):
+            self.assertIsNone(repository.change_for_token(token))
+        with self.assertRaises(repository.NotFound):
+            with repository.atomic(self.cid):
+                repository.decide(token, "approved")
+        with repository.atomic(self.other_id):
+            self.assertIsNotNone(repository.change_for_token(token))
+            self.assertEqual(repository.work_order("north-park")["revision"], 0)
+
+    def test_unknown_link_leaves_the_default_company_in_place(self):
+        with repository.atomic():
+            self.assertIsNone(repository.change_for_token("nothing"))
+            self.assertEqual(repository._ctx().company_id, default_company_id())
 
     def test_functions_need_a_transaction(self):
         with self.assertRaises(RuntimeError):

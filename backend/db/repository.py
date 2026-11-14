@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
@@ -96,14 +96,22 @@ class Conflict(Exception):
 class _Context:
     session: Session
     company_id: int
+    # True when the caller named the company. False means atomic() fell back to
+    # the default, and a GC link may then fix the company (see _resolve).
+    explicit: bool = True
 
 
 _current: ContextVar[_Context | None] = ContextVar("repository_context", default=None)
-_engine_override: Engine | None = None
+_engine_override: Engine | Connection | None = None
 
 
-def set_engine(engine: Engine | None) -> None:
-    """Use this engine instead of the one built from DATABASE_URL (tests)."""
+def set_engine(engine: Engine | Connection | None) -> None:
+    """Use this engine instead of the one built from DATABASE_URL (tests, smoke test).
+
+    A Connection that is inside a transaction is also accepted: every atomic()
+    then runs in a savepoint of that outer transaction, so the caller can roll
+    everything back at the end.
+    """
     global _engine_override
     _engine_override = engine
 
@@ -130,8 +138,10 @@ def atomic(company_id: int | None = None) -> Iterator[None]:
         yield
         return
     company = default_company_id() if company_id is None else company_id
-    with Session(_engine_override or get_engine()) as session:
-        marker = _current.set(_Context(session, company))
+    bind = _engine_override or get_engine()
+    options = {"join_transaction_mode": "create_savepoint"} if isinstance(bind, Connection) else {}
+    with Session(bind, **options) as session:
+        marker = _current.set(_Context(session, company, explicit=company_id is not None))
         try:
             yield
             session.commit()
@@ -485,8 +495,15 @@ def create_change(
     title="",
     project_id="north-park",
     submitted_by="contractor",
+    *,
+    submitted_by_user_id: int | None = None,
 ):
-    """Save a field report with its photos and alert the office."""
+    """Save a field report with its photos and alert the office.
+
+    submitted_by_user_id is the signed-in caller (from the verified token). When
+    given, that user must be a field user of this company and is the submitter.
+    Without it, the prototype's label is matched to a field user by name.
+    """
     context = _ctx()
     session, company = context.session, context.company_id
     severity = str(getattr(severity, "value", severity))
@@ -495,12 +512,21 @@ def create_change(
     ).first()
     if project is None:
         raise NotFound(f"Project {project_id!r} not found")
-    fields = _users_with_roles("field")
-    if not fields:
-        raise NotFound("The company has no field user to submit the change")
-    # Schema v2 has no contractor/subcontractor label: both are the field role.
-    # Prefer the field user named like the label, else the first field user.
-    user = next((u for u in fields if u.name.lower() == str(submitted_by).lower()), fields[0])
+    if submitted_by_user_id is not None:
+        user = session.exec(
+            company_select(User, company).where(User.id == submitted_by_user_id)
+        ).first()
+        if user is None:
+            raise NotFound("Submitter not found")
+        if user.role != "field":
+            raise ValueError("Only a field user can submit a change")
+    else:
+        fields = _users_with_roles("field")
+        if not fields:
+            raise NotFound("The company has no field user to submit the change")
+        # Schema v2 has no contractor/subcontractor label: both are the field role.
+        # Prefer the field user named like the label, else the first field user.
+        user = next((u for u in fields if u.name.lower() == str(submitted_by).lower()), fields[0])
 
     # Serialize number assignment per company; the unique key is the backstop.
     session.exec(select(Company).where(Company.id == company).with_for_update()).first()
@@ -742,13 +768,21 @@ def _resolve(raw: str):
     """(link, request, event) for a link that is live: not revoked, not expired."""
     context = _ctx()
     session, company = context.session, context.company_id
+    if context.explicit:
+        query = company_select(ApprovalLink, company)
+    else:
+        # A GC is not signed in, so no caller names the company: the link does.
+        # The lookup is by the hash of a 32-byte random token, so it is not guessable.
+        query = select(ApprovalLink)
     link = session.exec(
-        company_select(ApprovalLink, company)
-        .where(ApprovalLink.token_hash == _hash(raw))
-        .where(col(ApprovalLink.revoked_at).is_(None))
+        query.where(ApprovalLink.token_hash == _hash(raw)).where(
+            col(ApprovalLink.revoked_at).is_(None)
+        )
     ).first()
     if link is None or _utc(link.expires_at) <= utc_now():
         return None
+    # Before anything else runs, every later query uses the link's company.
+    context.company_id = company = link.company_id
     request = session.exec(
         company_select(ApprovalRequest, company).where(ApprovalRequest.id == link.approval_request_id)
     ).first()
@@ -783,6 +817,7 @@ def decide(token: str, decision: str, actor_name: str | None = None) -> dict:
     if found is None:
         raise NotFound("Invalid link")
     _link, request, event = found
+    company = context.company_id  # set by the link when no company was named
     if event.status != "awaiting_gc" or request.status != "pending":
         raise Conflict("Already decided")
     gc = session.exec(
