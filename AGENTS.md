@@ -19,6 +19,14 @@ Two rules protect shared files:
 - Only Bona's agents change `backend/db/models.py` and the migrations. There is one writer for the database.
 - Anyone who adds a dependency (`backend/requirements.txt`, `frontend/package.json`) says so in the PR description.
 
+## Decision record
+
+- **Nov 13, 2026: persistence moves to Supabase (PostgreSQL) now.** The schema is in `backend/db/models.py` and `backend/db/migrations/` (task B2). A repository layer in `backend/db/repository.py` (task B3) exposes the same functions as `backend/services/store.py`, and routes move onto it (task J4). The SQLite prototype in `services/store.py` stays on `main` as a fallback until the full workflow passes on Supabase. **Do not add features to `store.py`**; if a route needs new data behaviour, ask Bona so it lands in the schema and the repository first.
+- **Fast track and sign-in are required for Nov 18** (see the job list in `tasks/week-1.md`). The role picker in the app is a preview, not authentication.
+- Only Bona (or an agent Bona started) runs migrations or touches the Supabase project.
+
+If your chat with your person says something that differs from this file, ask them to update this file in a PR rather than relying on the chat.
+
 ## Working on a task
 
 1. Read your task in `tasks/week-1.md`: owner, due date, dependencies, "done when", files you may edit.
