@@ -176,12 +176,12 @@ Security requirements for v0.2:
 
 ## Team ownership and roadmap
 
-Roles are proposed and become final after the Nov 11 team meeting. The day-by-day tasks live in the 1-week plan.
+Roles were confirmed by the team on Nov 11. The day-by-day tasks live in the 1-week plan.
 
 | Person | Role | Owns |
 | --- | --- | --- |
 | Bona | Project coordinator, database lead, AI lead | Schema and migrations, repository layer, AI integration, Tad's data, partner contact |
-| Jalen | Backend API lead (proposed) | Photo upload, estimator review, GC email, routes on the database, backend tests |
+| Jalen | Backend API lead | Photo upload, estimator review, GC email, routes on the database, backend tests |
 | Uriel | Frontend lead, architecture and specification | Expo screens, GC page, demo, this document |
 
 Each task has one owner and one reviewer. Phase 1 is this week's demo. Later phases are ordered by dependency, not dated, because they wait on Tad's data and the partners' feedback.
