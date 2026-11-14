@@ -16,7 +16,10 @@ export type ChangeOrder = {
   created_at: string;
   description: string;
   severity: Severity;
-  status: "submitted" | "awaiting_client" | "approved" | "rejected";
+  status: "submitted" | "in_review" | "authorized_to_proceed" | "awaiting_gc" | "approved" | "declined" | "withdrawn";
+  proposed_cost_cents?: number | null;
+  requested_timeline_days?: number | null;
+  currency?: string;
   photo_keys: string[];
   amount: number;
   impact_days: number;
