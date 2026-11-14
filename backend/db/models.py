@@ -13,7 +13,12 @@ Rules the schema enforces (see AGENTS.md, "Domain rules"):
 - One status set, stored on the change (ChangeEvent.status).
 - Fast track: only a high-priority change can be authorized to proceed.
 - Money is integer cents plus a currency code.
-- GC links store the SHA-256 hash of the token, never the token.
+- GC links store the SHA-256 hash of the token, never the token. A
+  notification never holds a link that carries a token.
+- The field report (ChangeEvent.description) is never overwritten by the
+  reviewed proposal (ChangeOrderRevision.scope).
+- A project's work order is not a table. It is the project's approved
+  changes, each with the revision the GC approved; see migrations/README.md.
 """
 
 import uuid
@@ -58,6 +63,7 @@ NOTIFICATION_TYPES = (
 )
 NOTIFICATION_STATUSES = ("pending", "sent")
 DEFAULT_CURRENCY = "USD"
+_CURRENCY_RULE = "length(currency) = 3 AND currency = upper(currency)"
 
 
 def utc_now() -> datetime:
@@ -119,6 +125,27 @@ class User(SQLModel, table=True):
     auth_user_id: uuid.UUID | None = Field(default=None, unique=True, index=True)
 
 
+class Project(SQLModel, table=True):
+    """A job. Its work order is its base budget plus its approved changes."""
+
+    __tablename__ = "project"
+    __table_args__ = (
+        CheckConstraint(_CURRENCY_RULE, name="project_currency_valid"),
+        _company_key("project"),
+        UniqueConstraint("company_id", "slug", name="uq_project_company_id_slug"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    company_id: int = Field(foreign_key="company.id")
+    # Short name used in URLs and by the app, for example "north-park".
+    slug: str
+    name: str
+    # The contract amount before any change order. Empty until it is known.
+    base_budget_cents: int | None = Field(default=None, sa_column=Column(BigInteger, nullable=True))
+    currency: str = Field(default=DEFAULT_CURRENCY)
+    created_at: datetime = Field(default_factory=utc_now, sa_column=_utc_column())
+
+
 class ChangeEvent(SQLModel, table=True):
     """The change reported from the field. Its status is the status of the change."""
 
@@ -139,14 +166,22 @@ class ChangeEvent(SQLModel, table=True):
             name="change_event_authorized_status_needs_authorization",
         ),
         _company_key("change_event"),
+        UniqueConstraint("company_id", "number", name="uq_change_event_company_id_number"),
+        _same_company("change_event", "project_id", "project"),
         _same_company("change_event", "submitted_by_id", "user"),
         _same_company("change_event", "authorized_by_id", "user"),
         Index("ix_change_event_company_id_status", "company_id", "status"),
+        Index("ix_change_event_company_id_project_id", "company_id", "project_id"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
     company_id: int = Field(foreign_key="company.id")
+    project_id: int
+    # Human-readable number, unique in the company. Shown as "CO-<number>".
+    number: int
     submitted_by_id: int = Field(index=True)
+    title: str
+    # The original field report. Reviewed wording goes on the revision.
     description: str
     # The priority flag. The API and the app call this field "severity".
     severity: str = Field(default="normal")
@@ -174,6 +209,69 @@ class Photo(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, sa_column=_utc_column())
 
 
+class ChangeHistory(SQLModel, table=True):
+    """One entry in a change's timeline: the status it moved to, who, and when.
+
+    Entries are only ever added. Write one in the same transaction as the
+    status change it records.
+    """
+
+    __tablename__ = "change_history"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", CHANGE_STATUSES), name="change_history_status_valid"),
+        _same_company("change_history", "change_event_id", "change_event"),
+        _same_company("change_history", "actor_user_id", "user"),
+        Index("ix_change_history_company_id_change_event_id", "company_id", "change_event_id"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    company_id: int = Field(foreign_key="company.id")
+    change_event_id: int
+    # The status the change moved to.
+    status: str
+    # The line shown in the timeline, for example "Sent to the GC".
+    title: str
+    # Who did it. Empty when the system did. The name is copied so the
+    # timeline still reads correctly after a user is renamed.
+    actor_user_id: int | None = None
+    actor_name: str
+    created_at: datetime = Field(default_factory=utc_now, sa_column=_utc_column())
+
+
+class AiSuggestion(SQLModel, table=True):
+    """An AI suggestion for the estimator. Advisory only; it decides nothing."""
+
+    __tablename__ = "ai_suggestion"
+    __table_args__ = (
+        CheckConstraint(_CURRENCY_RULE, name="ai_suggestion_currency_valid"),
+        CheckConstraint("suggested_cost_cents >= 0", name="ai_suggestion_cost_valid"),
+        CheckConstraint("suggested_timeline_days >= 0", name="ai_suggestion_timeline_valid"),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="ai_suggestion_confidence_valid",
+        ),
+        _same_company("ai_suggestion", "change_event_id", "change_event"),
+        Index("ix_ai_suggestion_company_id_change_event_id", "company_id", "change_event_id"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    company_id: int = Field(foreign_key="company.id")
+    change_event_id: int
+    # The originally contracted scope the estimator gave the model to compare against.
+    original_scope: str
+    suggested_scope: str
+    suggested_cost_cents: int = Field(sa_column=Column(BigInteger, nullable=False))
+    currency: str = Field(default=DEFAULT_CURRENCY)
+    suggested_timeline_days: int
+    # The model's reasons, assumptions and limits.
+    rationale: str
+    # True when the model thinks the work is already in the original scope.
+    in_scope: bool
+    model_id: str | None = None
+    confidence: float | None = None
+    created_at: datetime = Field(default_factory=utc_now, sa_column=_utc_column())
+
+
 class ChangeOrder(SQLModel, table=True):
     """The estimator's proposal for one change. Its terms live in the revisions."""
 
@@ -195,10 +293,7 @@ class ChangeOrderRevision(SQLModel, table=True):
     __tablename__ = "change_order_revision"
     __table_args__ = (
         UniqueConstraint("change_order_id", "revision_number", name="uq_order_revision_number"),
-        CheckConstraint(
-            "length(currency) = 3 AND currency = upper(currency)",
-            name="change_order_revision_currency_valid",
-        ),
+        CheckConstraint(_CURRENCY_RULE, name="change_order_revision_currency_valid"),
         CheckConstraint(
             "requested_timeline_days >= 0",
             name="change_order_revision_timeline_valid",
@@ -216,8 +311,10 @@ class ChangeOrderRevision(SQLModel, table=True):
     company_id: int = Field(foreign_key="company.id")
     change_order_id: int = Field(index=True)
     revision_number: int
-    title: str
-    reason: str
+    # Optional. When empty, the change's own title is used.
+    title: str | None = None
+    reason: str | None = None
+    # The reviewed wording of the work, as proposed to the GC.
     scope: str
     # Money is integer cents plus a currency code, never a float.
     proposed_cost_cents: int | None = Field(default=None, sa_column=Column(BigInteger, nullable=True))
@@ -314,6 +411,11 @@ class Notification(SQLModel, table=True):
     __table_args__ = (
         CheckConstraint(_one_of("type", NOTIFICATION_TYPES), name="notification_type_valid"),
         CheckConstraint(_one_of("status", NOTIFICATION_STATUSES), name="notification_status_valid"),
+        # The GC token exists only in the email. It must never be saved here.
+        CheckConstraint(
+            "message NOT LIKE '%token=%' AND (link_target IS NULL OR link_target NOT LIKE '%token=%')",
+            name="notification_holds_no_token",
+        ),
         _same_company("notifications", "report_id", "change_event"),
         _same_company("notifications", "recipient_user_id", "user"),
         Index("ix_notifications_company_id_recipient_user_id", "company_id", "recipient_user_id"),
@@ -325,6 +427,10 @@ class Notification(SQLModel, table=True):
     report_id: int = Field(index=True)
     recipient_user_id: int
     type: str = Field(default="change_submitted")
+    # The text shown to the recipient.
+    message: str
+    # Where the alert opens in the app, for example "/changes/12". Never a token link.
+    link_target: str | None = None
     status: str = Field(default="pending")
     created_at: datetime = Field(default_factory=utc_now, sa_column=_utc_column())
     sent_at: datetime | None = Field(default=None, sa_column=_utc_column(nullable=True))
@@ -334,8 +440,11 @@ class Notification(SQLModel, table=True):
 # db.database.company_select() so the company filter cannot be forgotten.
 TENANT_MODELS: tuple[type[SQLModel], ...] = (
     User,
+    Project,
     ChangeEvent,
     Photo,
+    ChangeHistory,
+    AiSuggestion,
     ChangeOrder,
     ChangeOrderRevision,
     ApprovalRequest,
