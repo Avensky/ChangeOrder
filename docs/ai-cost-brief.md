@@ -33,6 +33,7 @@ Nothing below is measured yet, because Tad's documents have not arrived. Page co
 Notes on the assumptions:
 
 - A knowledge-base passage is about 300 tokens by default [6].
+- **1.5 runs per change order** (one run plus re-asks after edits) is the working assumption until Tad's data arrives and it can be tested.
 - Both Claude models reason before they answer by default [4][5]. I assume that reasoning is billed as output; the high case allows for it. Not verified on an AWS page.
 
 ## 3. Monthly budget
@@ -59,21 +60,32 @@ Uses the recommended model, Claude Sonnet 5.5, at $2.20 per 1M input tokens and 
 | 200 | 2.18 + 0.20 + 5.02 = $7.40 | 8.78 + 0.30 + 5.02 = **$14.10** | 59.00 + 0.60 + 100.46 = $160.06 |
 | 1,000 | 10.89 + 1.00 + 5.02 = $16.91 | 43.89 + 1.50 + 5.02 = **$50.41** | 295.02 + 3.00 + 100.46 = $398.48 |
 
-As data grows, add $5.02 a month for each extra GB. At 5 GB that is 4 × 5.02 = $20.08 more.
+**Growth scenario, 5 GB** (expected use). Storage is 5 × 5.02 = $25.12 a month, which is 4 × 5.02 = $20.08 more than at 1 GB. Each further GB adds $5.02 a month.
+
+| Change orders a month | Model + lookups + 5 GB storage | Monthly total |
+| ---: | --- | ---: |
+| 50 | 2.19 + 0.08 + 25.12 | **$27.39** |
+| 200 | 8.78 + 0.30 + 25.12 | **$34.20** |
+| 1,000 | 43.89 + 1.50 + 25.12 | **$70.51** |
 
 Not included: hosting for the app's API, logging, photo storage, tax, and people's time.
 
 ### Who pays
 
-AWS credits pay up to $100, then Cohyric pays the bill. On Nov 13, 2026 the credits had 151 days left, so they expire around Apr 13, 2027. That is 151 ÷ 30.4 = 4.97 months. Cohyric starts paying when the $100 runs out or the credits expire, whichever comes first. The table uses the starting plan.
+AWS credits pay up to $100, then Cohyric pays the bill. On Nov 13, 2026 the credits had 151 days left, so they expire around Apr 13, 2027. That is 151 ÷ 30.4 = 4.97 months. Cohyric starts paying for Bedrock when the $100 runs out or the credits expire, whichever comes first.
 
-| Change orders a month | Monthly total | Months until $100 runs out | Which comes first | Credit used |
-| ---: | ---: | --- | --- | --- |
-| 50 | $7.29 | 100 ÷ 7.29 = 13.7 | Expiry, at 4.97 months | 7.29 × 4.97 = $36.23 |
-| 200 | $14.10 | 100 ÷ 14.10 = 7.1 | Expiry, at 4.97 months | 14.10 × 4.97 = $70.08 |
-| 1,000 | $50.41 | 100 ÷ 50.41 = 2.0 | The $100, at 2.0 months | $100.00 |
+The covered cost per month is the Bedrock charges: model + lookups + knowledge-base index ($5.00 per GB). S3 file storage ($0.023 per GB) is not covered and is billed to Cohyric from month 1. Month 1 starts Nov 13, 2026.
 
-At 50 or 200 change orders a month, part of the credit goes unused. The proof of concept and the model comparison in section 4 are best run before Apr 13, 2027, while the credits pay for them.
+| Data | Change orders a month | Covered cost per month | Months the $100 lasts | Months of credit left before expiry | First month Cohyric pays for Bedrock |
+| --- | ---: | --- | --- | --- | --- |
+| 1 GB | 50 | 2.19 + 0.08 + 5.00 = $7.27 | 100 ÷ 7.27 = 13.8 | 4.97 (expiry first) | Month 6 (after Apr 13, 2027) |
+| 1 GB | 200 | 8.78 + 0.30 + 5.00 = $14.08 | 100 ÷ 14.08 = 7.1 | 4.97 (expiry first) | Month 6 (after Apr 13, 2027) |
+| 1 GB | 1,000 | 43.89 + 1.50 + 5.00 = $50.39 | 100 ÷ 50.39 = 2.0 | 4.97 | Month 2 (the $100 runs out first) |
+| 5 GB | 50 | 2.19 + 0.08 + 25.00 = $27.27 | 100 ÷ 27.27 = 3.7 | 4.97 | Month 4 |
+| 5 GB | 200 | 8.78 + 0.30 + 25.00 = $34.08 | 100 ÷ 34.08 = 2.9 | 4.97 | Month 3 |
+| 5 GB | 1,000 | 43.89 + 1.50 + 25.00 = $70.39 | 100 ÷ 70.39 = 1.4 | 4.97 | Month 2 |
+
+At 1 GB and 50 or 200 change orders a month, part of the credit goes unused. The proof of concept and the model comparison in section 4 are best run before Apr 13, 2027, while the credits pay for them.
 
 **The credits cover Claude.** AWS's general credit terms exclude AWS Marketplace charges unless AWS authorizes them [8], and Claude models are billed through Marketplace [4][5]. Bona checked our credit on Nov 13, 2026: it applies to Amazon Bedrock, Amazon Bedrock AgentCore and Amazon SageMaker AI, and Claude through Bedrock is covered.
 
@@ -90,6 +102,8 @@ All three are in the Bedrock catalog. Prices are the "Geo and in-region" rates, 
 | **Claude Sonnet 5.5 (recommended)** | **$2.20** | **$11.00** | **$0.0439** | **$43.89** |
 
 Example for Haiku 5.5: 13,950 × 0.11 ÷ 1M + 1,200 × 0.55 ÷ 1M = $0.00153 + $0.00066 = $0.0022.
+
+Rejected: global cross-region routing. Sonnet 5.5 would cost $2.00 input and $10.00 output per 1M [1], about 10% less, but requests can be served outside the US. Tad's data must stay on US servers at all times, so it is not used in any total in this brief.
 
 **Recommendation: Claude Sonnet 5.5.** Con's point is that estimate accuracy decides whether subcontractors get paid, and the price gap between the cheapest and the dearest model here is small: about $42 a month at 1,000 change orders in the expected case (43.89 − 2.19), and about $280 in the high case (295.02 − 14.75). AWS describes Sonnet 5.5 as built for knowledge work [5] and Haiku 5.5 as built for high-volume, speed-sensitive work [4]; our job is low-volume and accuracy-sensitive. This is a choice on fit and price, not on test results. No model has been tested on Tad's data yet. The proof of concept should run the same change orders through Haiku 5.5 as well. If the estimator cannot tell the answers apart, switching cuts the model cost by 95%.
 
