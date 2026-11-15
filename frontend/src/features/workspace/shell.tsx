@@ -53,6 +53,10 @@ const roleNavigation: Record<
     action: { path: string; title: string; icon: LucideIcon };
   }
 > = {
+  manager: {
+    links: [["/", "Manager overview", "Overview"], ["/requests", "Work authorizations", "Requests"], ["/activity", "Team activity", "Activity"]],
+    action: { path: "/requests?high=1", title: "Review urgent work", icon: ClipboardCheck },
+  },
   contractor: {
     links: [
       ["/", "Job overview", "Overview"],
@@ -121,9 +125,9 @@ export function AppShell({
   const profile = roles[role];
   const { links, action } = roleNavigation[role];
   const pending = changes.filter(({ status }) => {
-    if (role === "office") return status === "submitted";
-    if (role === "approver") return status === "awaiting_client";
-    return status === "submitted" || status === "awaiting_client";
+    if (role === "office") return ["submitted", "in_review", "authorized_to_proceed"].includes(status);
+    if (role === "approver") return status === "awaiting_gc";
+    return status === "submitted" || status === "awaiting_gc";
   }).length;
 
   return (

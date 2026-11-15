@@ -85,7 +85,7 @@ export function ProjectsScreen() {
           const open = requests.filter(({ status }) =>
             isOffice
               ? status === "submitted"
-              : status === "submitted" || status === "awaiting_client",
+              : status === "submitted" || status === "awaiting_gc",
           ).length;
           return (
             <Pressable

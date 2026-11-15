@@ -59,7 +59,7 @@ export function ChangeDetailScreen() {
 }
 
 function ChangeDetail({ change }: { change: WorkspaceChange }) {
-  const { role, review, decide, refresh } = useWorkspace();
+  const { role, review, authorize, decide, refresh } = useWorkspace();
   const [amount, setAmount] = useState(String(change.amount));
   const [days, setDays] = useState(String(change.impactDays));
   const [busy, setBusy] = useState(false);
@@ -73,7 +73,7 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
     change.suggestion ?? null,
   );
   const [suggesting, setSuggesting] = useState(false);
-  const [scope, setScope] = useState(change.description);
+  const [scope, setScope] = useState(change.approvedScope ?? change.description);
   const photoUris =
     change.photoUris ?? (change.photoUri ? [change.photoUri] : []);
   async function suggest() {
@@ -103,26 +103,23 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
   }
   const project = getProject(change.projectId);
   const isApprover = role === "approver";
-  const showTerms = role !== "subcontractor" && change.status !== "submitted";
+  const reviewable = ["submitted", "in_review", "authorized_to_proceed"].includes(change.status);
+  const showTerms = role !== "subcontractor" && !reviewable;
   const history = visibleHistory(role, change);
   const stage =
-    change.status === "submitted"
+    reviewable
       ? 0
-      : change.status === "awaiting_client"
+      : change.status === "awaiting_gc"
         ? 1
         : 2;
 
   async function sendForReview() {
     if (busy) return;
-    const cost = Number(amount),
-      impact = Number(days);
-    if (
-      !Number.isFinite(cost) ||
-      cost < 0 ||
-      !Number.isInteger(impact) ||
-      impact < 0
-    ) {
-      setError("Enter a valid non-negative amount and whole number of days.");
+    const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(amount.trim());
+    const cost = match ? Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0")) : NaN;
+    const impact = /^\d+$/.test(days.trim()) ? Number(days) : NaN;
+    if (!Number.isSafeInteger(cost) || cost > 10_000_000_000 || !Number.isInteger(impact) || impact > 3650 || !scope.trim()) {
+      setError("Enter a USD cost with at most two decimal places, 0–3650 whole days, and a work scope.");
       return;
     }
     setBusy(true);
@@ -199,8 +196,8 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
             "Submitted",
             "Office review",
             change.severity === "high"
-              ? "Office approval"
-              : change.status === "rejected"
+              ? "GC decision"
+              : change.status === "declined"
                 ? "Declined"
                 : "Approver decision",
           ].map((label, i) => (
@@ -391,7 +388,19 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
           </Card>
 
           <Card className="border-[#CEDFCB] p-5">
-            {role === "office" && change.status === "submitted" ? (
+            {role === "manager" && change.severity === "high" && ["submitted", "in_review"].includes(change.status) ? (
+              <>
+                <Text className="text-[15px] font-semibold text-ink">Authorize urgent work</Text>
+                <Text className="my-4 text-[12px] leading-5 text-muted">Work may start before the estimate. This does not approve the cost; the estimator adds it and the GC decides afterward.</Text>
+                <Button busy={busy} onPress={async () => {
+                  if (busy) return;
+                  setBusy(true); setError("");
+                  try { await authorize(change.id); }
+                  catch (cause) { setError(cause instanceof Error ? cause.message : "Could not authorize work."); }
+                  finally { setBusy(false); }
+                }}>Authorize work now</Button>
+              </>
+            ) : role === "office" && reviewable ? (
               <>
                 <Text className="text-[15px] font-semibold text-ink">
                   Prepare the proposal
@@ -407,7 +416,7 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
                     </Text>
                     <Text className="text-[11px] leading-5 text-muted">
                       Paste the approved original scope. AI compares it with
-                      this report and supported photos. Review all assumptions
+                      this report. Photos are context for people. Review all assumptions
                       before using the suggestion.
                     </Text>
                     <TextInput
@@ -493,17 +502,14 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
                 />
                 {change.severity === "high" && (
                   <Text className="mb-4 text-[10px] leading-4 text-ochre">
-                    High-priority changes can be approved directly by the
-                    office.
+                    The manager authorizes urgent work before estimation. The GC still approves or declines the cost.
                   </Text>
                 )}
                 <Button onPress={sendForReview} busy={busy} icon={Send}>
-                  {change.severity === "high"
-                    ? "Approve urgent change"
-                    : "Send for approval"}
+                  Send estimate to GC
                 </Button>
               </>
-            ) : isApprover && change.status === "awaiting_client" ? (
+            ) : isApprover && change.source === "demo" && change.status === "awaiting_gc" ? (
               <>
                 <View className="mb-3 h-10 w-10 items-center justify-center rounded-xl bg-mint">
                   <CheckCircle2 size={20} color="#23664D" />
@@ -529,7 +535,7 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
                   </Button>
                 </View>
               </>
-            ) : change.status === "approved" || change.status === "rejected" ? (
+            ) : change.status === "approved" || change.status === "declined" ? (
               <>
                 <CheckCircle2
                   size={25}
@@ -549,14 +555,16 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
             ) : (
               <>
                 <Text className="text-[15px] font-semibold text-ink">
-                  {change.status === "submitted"
-                    ? "Waiting for office review"
+                  {change.status === "authorized_to_proceed"
+                    ? "Work authorized · estimate pending"
+                    : change.status === "submitted"
+                    ? "Waiting for estimator review"
                     : "Waiting for a decision"}
                 </Text>
                 <Text className="mb-4 mt-2 text-[11px] leading-[18px] text-muted">
                   {change.status === "submitted"
-                    ? "The Office Manager will review the site report and prepare the terms."
-                    : "The proposal has been sent to the Approver."}
+                    ? "The estimator will review the site report and prepare the terms."
+                    : "The GC still decides the cost after the estimator submits the terms."}
                 </Text>
               </>
             )}

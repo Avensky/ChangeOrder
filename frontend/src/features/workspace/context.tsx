@@ -48,6 +48,7 @@ type Workspace = {
     days: number,
     scope: string,
   ) => Promise<void>;
+  authorize: (id: string) => Promise<void>;
   decide: (id: string, approved: boolean) => Promise<void>;
   reset: () => void;
   syncError: string;
@@ -76,10 +77,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       description: c.description,
       projectId: c.project_id,
       severity: c.severity,
-      status: c.status,
-      amount: c.amount,
+      status: ({ awaiting_client: "awaiting_gc", rejected: "declined" } as Record<string, ChangeStatus>)[c.status] ?? c.status,
+      amount: c.proposed_cost_cents != null ? c.proposed_cost_cents / 100 : c.amount,
       approvedScope: c.approved_scope,
-      impactDays: c.impact_days,
+      impactDays: c.requested_timeline_days ?? c.impact_days,
       author: roles[c.submitted_by].person,
       submittedBy: c.submitted_by,
       sentForApproval: c.sent_for_approval,
@@ -232,71 +233,50 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     days: number,
     scope: string,
   ) {
-    if (role !== "office")
-      throw new Error("Switch to Office Manager to review a change.");
+    if (role !== "office") throw new Error("Switch to Estimator to review a change.");
     const record = changes.find((change) => change.id === id);
-    if (!record || record.status !== "submitted")
-      throw new Error("This request has already been reviewed.");
-    let status: ChangeStatus =
-      record.severity === "high" ? "approved" : "awaiting_client";
+    if (!record || !["submitted", "in_review", "authorized_to_proceed"].includes(record.status))
+      throw new Error("This change is no longer open for review.");
     if (record.source === "connected") {
-      const result = await requestJson<{ status: ChangeStatus }>(
-        "/api/v1/changes/" + encodeURIComponent(id) + "/admin-approve",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ amount, impact_days: days, scope }),
-        },
+      const result = await requestJson<ChangeOrder>(
+        "/api/v1/changes/" + encodeURIComponent(id) + "/review",
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ proposed_cost_cents: amount, requested_timeline_days: days, scope, currency: "USD" }) },
       );
-      status = result.status;
-      await refresh();
+      setChanges(items => items.map(item => item.id === id ? fromServer(result) : item));
       return;
     }
-    update(
-      id,
-      status,
-      status === "approved"
-        ? "Urgent change approved by Office Manager"
-        : "Sent to approver",
-      {
-        amount,
-        impactDays: days,
-        approvedScope: scope,
-        sentForApproval: status === "awaiting_client",
-      },
-    );
+    update(id, "awaiting_gc", "Estimate saved and sent to the GC", {
+      amount: amount / 100, impactDays: days, approvedScope: scope, sentForApproval: true,
+    });
+  }
+
+  async function authorize(id: string) {
+    if (role !== "manager") throw new Error("Switch to Manager to authorize work.");
+    const record = changes.find(change => change.id === id);
+    if (!record || record.severity !== "high" || !["submitted", "in_review"].includes(record.status))
+      throw new Error("Only an open high-priority change can be authorized.");
+    if (record.source === "connected") {
+      const result = await requestJson<ChangeOrder>("/api/v1/changes/" + encodeURIComponent(id) + "/authorize", { method: "POST" });
+      setChanges(items => items.map(item => item.id === id ? fromServer(result) : item));
+      return;
+    }
+    update(id, "authorized_to_proceed", "Manager authorized work; estimate and GC decision still required");
   }
 
   async function decide(id: string, approved: boolean) {
     if (role !== "approver")
       throw new Error("Switch to Approver to record a decision.");
     const record = changes.find((change) => change.id === id);
-    if (!record?.sentForApproval || record.status !== "awaiting_client")
+    if (!record?.sentForApproval || record.status !== "awaiting_gc")
       throw new Error("This request is no longer awaiting a decision.");
     if (record.source === "connected") {
-      const notices = await requestJson<{ change_id: string; msg: string }[]>(
-        "/api/v1/notifications?to=client",
-      );
-      const link = notices
-        .filter((notice) => notice.change_id === id)
-        .at(-1)?.msg;
-      const token = link ? new URL(link).searchParams.get("token") : null;
-      if (!token) throw new Error("The approval link could not be found.");
-      await requestJson(
-        "/api/v1/approval-session/" +
-          (approved ? "approve" : "decline") +
-          "?token=" +
-          encodeURIComponent(token),
-        { method: "POST" },
-      );
+      throw new Error("The GC decides through the emailed approval link, without signing in.");
     }
-    if (record.source === "connected") {
-      await refresh();
-      return;
-    }
+
     update(
       id,
-      approved ? "approved" : "rejected",
+      approved ? "approved" : "declined",
       approved ? "Change approved" : "Change declined",
     );
   }
@@ -325,6 +305,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           })),
         create,
         review,
+        authorize,
         decide,
         reset,
         syncError,
