@@ -30,7 +30,7 @@ Order of the main chain: B2 (schema), then B3 (repository layer), then J4 (route
 ## B3 Repository layer
 
 - **Owner:** Bona. **Due:** Mon Nov 16. **Depends on:** B2 (publish the function signatures and an in-memory version by Fri Nov 13 so Jalen can start).
-- **Task:** Add repository functions with the same names and behaviour as the public functions in `backend/services/store.py` (the prototype on `main`), backed by the B2 tables. A setting (for example `WORKSPACE_BACKEND=sqlite|postgres`) chooses the store, so `main` stays demoable until cutover. The repository should create a change, list changes, record the estimator's review, authorize a fast-track change, send to the GC, record the GC's decision, and read and write notifications. Every function takes the company and filters by it. This replaces `backend/services/store.py`.
+- **Task:** Add repository functions with the same names and behaviour as the public functions in `backend/services/store.py` (the prototype on `main`), backed by the B2 tables. A setting (for example `WORKSPACE_BACKEND=sqlite|postgres`) chooses the store, so `main` stays demoable until cutover. The repository should create a change, list changes, record the estimator's review, authorize a fast-track change, send to the GC, record the GC's decision, and read and write notifications. Every function takes the company and filters by it. Until cutover both stores exist; remove `backend/services/store.py` only after the full workflow passes on Supabase.
 - **Done when:** Jalen's routes call it and data survives a backend restart.
 - **May edit:** `backend/db/repository.py` (new), `backend/db/database.py`.
 - **Spec:** Data model and storage; Workflow and approval rules.

@@ -19,10 +19,10 @@ Two rules protect shared files:
 - Only Bona's agents change `backend/db/models.py` and the migrations. There is one writer for the database.
 - Anyone who adds a dependency (`backend/requirements.txt`, `frontend/package.json`) says so in the PR description.
 
-## Decision record
+## Decisions in force
 
-- **Nov 13, 2026: persistence moves to Supabase (PostgreSQL) now.** The schema is in `backend/db/models.py` and `backend/db/migrations/` (task B2). A repository layer in `backend/db/repository.py` (task B3) exposes the same functions as `backend/services/store.py`, and routes move onto it (task J4). The SQLite prototype in `services/store.py` stays on `main` as a fallback until the full workflow passes on Supabase. **Do not add features to `store.py`**; if a route needs new data behaviour, ask Bona so it lands in the schema and the repository first.
-- **Fast track and sign-in are required for Nov 18** (see the job list in `tasks/week-1.md`). The role picker in the app is a preview, not authentication.
+- **Persistence is Supabase (PostgreSQL).** The schema is in `backend/db/models.py` and `backend/db/migrations/`. The repository layer in `backend/db/repository.py` exposes the same functions as `backend/services/store.py`, and the routes use it. The SQLite prototype in `services/store.py` stays as a fallback until the full workflow passes on Supabase. **Do not add features to `store.py`**; if a route needs new data behaviour, ask Bona so it lands in the schema and the repository first.
+- **Fast track and staff sign-in are in the current scope** (see `tasks/week-1.md`).
 - Only Bona (or an agent Bona started) runs migrations or touches the Supabase project.
 
 If your chat with your person says something that differs from this file, ask them to update this file in a PR rather than relying on the chat.
@@ -34,6 +34,10 @@ If your chat with your person says something that differs from this file, ask th
 3. Do only that task. Stay inside the files the brief allows.
 4. If the task depends on work that is not merged yet, code against the agreed contract (the repository function signatures or `docs/openapi.json`) with a fake or stub. Do not wait, and do not edit the other person's area to unblock yourself.
 5. Run the checks below, then open a pull request to `main` using the PR template.
+
+## Finishing a task
+
+Commit in small steps and push your branch. If `gh` is not installed, write the PR description following `.github/pull_request_template.md` to `PR_DESCRIPTION.md` at your worktree root (uncommitted) and report the branch name and the compare link `https://github.com/Avensky/ChangeOrder/pull/new/<branch>`. Work only in your own worktree and never edit your person's main checkout. In your final message say what is done, what you could not verify, and any question for your person.
 
 ## Commands
 
@@ -52,14 +56,14 @@ Run from the repository root unless noted.
 ## Definition of done
 
 - The "done when" line in the task brief is true, and the PR description says how you checked it.
-- Backend tests pass, `npm run typecheck` and `npm run lint` pass. The GitHub check runs the same commands and a PR cannot merge while it fails.
+- Backend tests pass, `npm run typecheck` and `npm run lint` pass. The GitHub check runs the same commands; do not merge a PR whose check fails.
 - If routes or schemas changed, `docs/openapi.json` is refreshed in the same PR.
 - Anything you could not check automatically, such as behavior on a phone, is listed in the PR description as a manual test with its result.
 - No secrets, `.env` files, or personal data in the diff.
 
 ## Pull requests and review
 
-- Open small PRs, at least daily. Rebase on `main` before opening.
+- Open small PRs, at least daily. Bring your branch up to date by merging `main` into it, not by rebasing: other PRs may be stacked on your commits, and a rebase gives them new identities.
 - A person reviews and merges every PR. Agents never merge and never push to `main`.
 - Reviewers: Jalen reviews Bona's database-facing changes and Uriel's API-facing changes. Bona reviews Jalen's schema use. Uriel reviews Jalen's API contract changes.
 - An agent may do a first-pass review in a separate session, but that does not replace the human review.
