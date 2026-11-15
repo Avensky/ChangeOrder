@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from schemas.changes import (
     Description,
+    EstimatorReview,
     ReviewTerms,
     Severity,
     Status,
@@ -10,9 +11,9 @@ from schemas.changes import (
     SuggestionRequest,
     WorkspaceChangeOut,
 )
-from services import store
+from services import email, prototype_approval, store
 from services.photos import save_photo
-from core.config import UPLOAD_DIR
+from core.config import UPLOAD_DIR, email_settings
 
 router = APIRouter(prefix="/api/v1", tags=["changes"])
 ProjectId = Literal["north-park", "harbor", "cedar"]
@@ -91,6 +92,64 @@ def admin_approve(change_id: str, terms: ReviewTerms = Body(...)):
         return {"status": c["status"]}
 
 
+@router.post("/changes/{change_id}/review", response_model=WorkspaceChangeOut)
+def estimator_review(change_id: str, terms: EstimatorReview = Body(...)):
+    """The estimator saves scope, proposed cost and timeline, and sends it on.
+
+    Reviewable from `submitted`, from `in_review`, and from
+    `authorized_to_proceed`: a fast-tracked change is authorized before the
+    estimate exists, so it still needs its terms added afterwards.
+    """
+    with store.atomic():
+        c = store.CHANGES.get(change_id)
+        if not c:
+            raise HTTPException(404, "Not found")
+        if c["status"] not in ("submitted", "in_review", "authorized_to_proceed"):
+            raise HTTPException(409, "This change is no longer open for review")
+        link = prototype_approval.record_review(
+            c,
+            terms.scope,
+            terms.proposed_cost_cents,
+            terms.requested_timeline_days,
+            terms.currency,
+        )
+        subject, body = email.approval_request(c, link)
+        sent = email.send(email_settings()["gc_address"], subject, body)
+        # The console link is the fallback and stays printed either way, so the
+        # demo works with no email key and when the provider is down.
+        print("GC LINK:", link, "(emailed)" if sent else "(not emailed)")
+        store.add_event(
+            c,
+            "awaiting_gc",
+            "Approval email sent to the GC" if sent else "GC link ready (email off)",
+            "System",
+        )
+        return c
+
+
+@router.post("/changes/{change_id}/authorize", response_model=WorkspaceChangeOut)
+def manager_authorize(change_id: str):
+    """Fast track: the manager lets work start before the estimate exists.
+
+    This authorizes work only. The GC still decides, so no timeout and no
+    authorization here ever approves a change.
+    """
+    with store.atomic():
+        c = store.CHANGES.get(change_id)
+        if not c:
+            raise HTTPException(404, "Not found")
+        if c["severity"] != "high":
+            raise HTTPException(409, "Only a high-priority change can be fast tracked")
+        if c["status"] not in ("submitted", "in_review"):
+            raise HTTPException(409, "This change is past the point of authorizing work")
+        prototype_approval.authorize_fast_track(c)
+        # A heads-up only. It carries no link, because there is nothing to
+        # decide until the estimator adds the cost.
+        subject, body = email.fast_track_notice(c)
+        email.send(email_settings()["gc_address"], subject, body)
+        return c
+
+
 @router.get("/approval-session", response_model=WorkspaceChangeOut)
 def approval_session(token: str):
     with store.atomic():
@@ -100,32 +159,39 @@ def approval_session(token: str):
         return c
 
 
-def _decide(token, new_status):
+def _decide(token, approving):
     with store.atomic():
         c = store.change_for_token(token)
         if not c:
             raise HTTPException(404, "Invalid link")
-        if c["status"] != "awaiting_client":
+        # A change sent by /review waits in awaiting_gc; one sent by the legacy
+        # /admin-approve waits in awaiting_client. Both are a pending decision.
+        if c["status"] not in ("awaiting_gc", "awaiting_client"):
             raise HTTPException(409, "Already decided")
+        # Answer a legacy request in legacy words so the merged frontend, which
+        # tests for "rejected", keeps working until U3 lands.
+        legacy = c["status"] == "awaiting_client"
+        if approving:
+            new_status = "approved"
+        else:
+            new_status = "rejected" if legacy else "declined"
         c["status"] = new_status
         title = (
-            "Change approved; work order updated"
-            if new_status == "approved"
-            else "Change declined"
+            "Change approved; work order updated" if approving else "Change declined"
         )
-        store.add_event(c, new_status, title, "Approver")
-        store.notify("contractor", c["id"], title)
+        store.add_event(c, new_status, title, "GC")
+        store.notify("contractor" if legacy else "office", c["id"], title)
         return {"status": new_status}
 
 
 @router.post("/approval-session/approve")
 def client_approve(token: str):
-    return _decide(token, "approved")
+    return _decide(token, True)
 
 
 @router.post("/approval-session/decline")
 def client_decline(token: str):
-    return _decide(token, "rejected")
+    return _decide(token, False)
 
 
 @router.get("/notifications")

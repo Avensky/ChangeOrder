@@ -147,6 +147,102 @@
         }
       }
     },
+    "/api/v1/changes/{change_id}/review": {
+      "post": {
+        "tags": [
+          "changes"
+        ],
+        "summary": "Estimator Review",
+        "description": "The estimator saves scope, proposed cost and timeline, and sends it on.\n\nReviewable from `submitted`, from `in_review`, and from\n`authorized_to_proceed`: a fast-tracked change is authorized before the\nestimate exists, so it still needs its terms added afterwards.",
+        "operationId": "estimator_review_api_v1_changes__change_id__review_post",
+        "parameters": [
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimatorReview"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceChangeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/changes/{change_id}/authorize": {
+      "post": {
+        "tags": [
+          "changes"
+        ],
+        "summary": "Manager Authorize",
+        "description": "Fast track: the manager lets work start before the estimate exists.\n\nThis authorizes work only. The GC still decides, so no timeout and no\nauthorization here ever approves a change.",
+        "operationId": "manager_authorize_api_v1_changes__change_id__authorize_post",
+        "parameters": [
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceChangeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/approval-session": {
       "get": {
         "tags": [
@@ -483,6 +579,48 @@
         ],
         "title": "Body_submit_change_api_v1_changes_post"
       },
+      "EstimatorReview": {
+        "properties": {
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "proposed_cost_cents": {
+            "type": "integer",
+            "maximum": 10000000000.0,
+            "minimum": 0.0,
+            "title": "Proposed Cost Cents"
+          },
+          "requested_timeline_days": {
+            "type": "integer",
+            "maximum": 3650.0,
+            "minimum": 0.0,
+            "title": "Requested Timeline Days"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "default": "USD"
+          }
+        },
+        "type": "object",
+        "required": [
+          "proposed_cost_cents",
+          "requested_timeline_days"
+        ],
+        "title": "EstimatorReview",
+        "description": "What the estimator saves: scope, proposed cost and requested timeline.\n\nMoney is integer cents plus a currency code, never a float. The field\nnames match B2's ChangeOrderRevision so the repository swap in J4 is a\nrename and nothing more."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -596,8 +734,13 @@
         "type": "string",
         "enum": [
           "submitted",
-          "awaiting_client",
+          "in_review",
+          "authorized_to_proceed",
+          "awaiting_gc",
           "approved",
+          "declined",
+          "withdrawn",
+          "awaiting_client",
           "rejected"
         ],
         "title": "Status"
@@ -787,6 +930,56 @@
               }
             ],
             "title": "Approved Scope"
+          },
+          "proposed_cost_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Cost Cents"
+          },
+          "requested_timeline_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Timeline Days"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "default": "USD"
+          },
+          "authorized_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized At"
+          },
+          "authorized_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized By"
           }
         },
         "type": "object",
