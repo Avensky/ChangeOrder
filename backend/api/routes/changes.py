@@ -11,9 +11,9 @@ from schemas.changes import (
     SuggestionRequest,
     WorkspaceChangeOut,
 )
-from services import prototype_approval, store
+from services import email, prototype_approval, store
 from services.photos import save_photo
-from core.config import UPLOAD_DIR
+from core.config import UPLOAD_DIR, email_settings
 
 router = APIRouter(prefix="/api/v1", tags=["changes"])
 ProjectId = Literal["north-park", "harbor", "cedar"]
@@ -113,8 +113,17 @@ def estimator_review(change_id: str, terms: EstimatorReview = Body(...)):
             terms.requested_timeline_days,
             terms.currency,
         )
-        # The console link stays the fallback until J3 sends real email.
-        print("GC LINK:", link)
+        subject, body = email.approval_request(c, link)
+        sent = email.send(email_settings()["gc_address"], subject, body)
+        # The console link is the fallback and stays printed either way, so the
+        # demo works with no email key and when the provider is down.
+        print("GC LINK:", link, "(emailed)" if sent else "(not emailed)")
+        store.add_event(
+            c,
+            "awaiting_gc",
+            "Approval email sent to the GC" if sent else "GC link ready (email off)",
+            "System",
+        )
         return c
 
 
@@ -134,6 +143,10 @@ def manager_authorize(change_id: str):
         if c["status"] not in ("submitted", "in_review"):
             raise HTTPException(409, "This change is past the point of authorizing work")
         prototype_approval.authorize_fast_track(c)
+        # A heads-up only. It carries no link, because there is nothing to
+        # decide until the estimator adds the cost.
+        subject, body = email.fast_track_notice(c)
+        email.send(email_settings()["gc_address"], subject, body)
         return c
 
 
