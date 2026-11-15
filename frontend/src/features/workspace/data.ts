@@ -1,6 +1,7 @@
 import type { ChangeOrder, Severity } from "@/features/change-orders/types";
 
-export type Role = "field" | "office" | "client";
+export type Role = "manager" | "contractor" | "subcontractor" | "office" | "approver";
+export type SubmitterRole = Extract<Role, "contractor" | "subcontractor">;
 export type Mode = "demo" | "connected";
 export type ChangeStatus = ChangeOrder["status"];
 export type Project = {
@@ -30,11 +31,16 @@ export type WorkspaceChange = {
   severity: Severity;
   status: ChangeStatus;
   amount: number;
+  approvedScope?: string | null;
   impactDays: number;
   author: string;
+  submittedBy: SubmitterRole;
+  sentForApproval: boolean;
   createdAt: string;
   source: Mode;
   photoUri?: string;
+  photoUris?: string[];
+  suggestion?: import("@/features/change-orders/types").Suggestion | null;
   history: Event[];
 };
 
@@ -42,25 +48,53 @@ export const roles: Record<
   Role,
   { label: string; person: string; initials: string; caption: string }
 > = {
-  field: {
-    label: "Field contractor",
+  manager: { label: "Manager", person: "Demo Manager", initials: "DM", caption: "Authorize urgent work before estimation" },
+  contractor: {
+    label: "Contractor",
     person: "Uriel Zacarias",
     initials: "UZ",
-    caption: "Capture & submit",
+    caption: "Coordinate changes across projects",
+  },
+  subcontractor: {
+    label: "Subcontractor",
+    person: "Marcus Rivera",
+    initials: "MR",
+    caption: "Report site changes and track submissions",
   },
   office: {
-    label: "Office coordinator",
+    label: "Estimator",
     person: "Avery Morgan",
     initials: "AM",
-    caption: "Review & coordinate",
+    caption: "Review requests and prepare terms",
   },
-  client: {
-    label: "Client / owner",
+  approver: {
+    label: "GC preview",
     person: "Jordan Ellis",
     initials: "JE",
-    caption: "Approve & keep moving",
+    caption: "Review terms and record decisions",
   },
 };
+
+export function isSubmitterRole(role: Role): role is SubmitterRole {
+  return role === "contractor" || role === "subcontractor";
+}
+
+export function canViewChange(role: Role, change: WorkspaceChange) {
+  if (role === "subcontractor") return change.submittedBy === role;
+  if (role === "approver") return change.sentForApproval;
+  return true;
+}
+
+export function visibleHistory(role: Role, change: WorkspaceChange) {
+  return role === "approver"
+    ? change.history.filter(
+        (event) =>
+          event.kind === "awaiting_gc" ||
+          event.kind === "approved" ||
+          event.kind === "declined",
+      )
+    : change.history;
+}
 
 export const projects: Project[] = [
   {
@@ -131,7 +165,7 @@ const rows: [
     "Replace the specified lobby fixtures with dimmable recessed lights to match the revised lighting plan.",
     "harbor",
     "normal",
-    "awaiting_client",
+    "awaiting_gc",
     2400,
     1,
   ],
@@ -161,7 +195,7 @@ const rows: [
     "Provide two additional floor outlets below the conference table.",
     "harbor",
     "normal",
-    "awaiting_client",
+    "awaiting_gc",
     680,
     0,
   ],
@@ -171,7 +205,7 @@ const rows: [
     "Add three floating oak shelves beside the range hood.",
     "north-park",
     "normal",
-    "rejected",
+    "declined",
     720,
     0,
   ],
@@ -204,12 +238,17 @@ export function seedChanges(): WorkspaceChange[] {
     ) => {
       const id = "demo-" + number;
       const time = `2026-10-${String(22 - Math.floor(i / 2)).padStart(2, "0")}T${String(16 - i).padStart(2, "0")}:20:00-07:00`;
+      const submittedBy = i % 2 ? "subcontractor" : "contractor";
+      const sentForApproval =
+        status === "awaiting_gc" ||
+        status === "declined" ||
+        status === "approved";
       const history: Event[] = [
         {
           id: id + "-submitted",
           changeId: id,
           title: "Change request submitted",
-          person: i % 2 ? "Marcus Rivera" : "Uriel Zacarias",
+          person: roles[submittedBy].person,
           time,
           kind: "submitted",
         },
@@ -218,20 +257,19 @@ export function seedChanges(): WorkspaceChange[] {
         history.push({
           id: id + "-review",
           changeId: id,
-          title:
-            status === "awaiting_client"
-              ? "Sent to client for approval"
-              : "Office review completed",
-          person: "Avery Morgan",
+          title: sentForApproval
+            ? "Sent to approver"
+            : "Office review completed",
+          person: roles.office.person,
           time,
-          kind: "review",
+          kind: sentForApproval ? "awaiting_gc" : "review",
         });
-      if (status === "approved" || status === "rejected")
+      if (status === "approved" || status === "declined")
         history.push({
           id: id + "-decision",
           changeId: id,
           title: status === "approved" ? "Change approved" : "Change declined",
-          person: severity === "high" ? "Avery Morgan" : "Jordan Ellis",
+          person: roles[sentForApproval ? "approver" : "office"].person,
           time,
           kind: status,
         });
@@ -246,6 +284,8 @@ export function seedChanges(): WorkspaceChange[] {
         amount,
         impactDays,
         author: history[0].person,
+        submittedBy,
+        sentForApproval,
         createdAt: time,
         source: "demo",
         history,
@@ -258,7 +298,8 @@ export const money = (value: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
   }).format(value);
 export const shortDate = (value: string) =>
   new Intl.DateTimeFormat("en-US", {
@@ -269,8 +310,11 @@ export const shortDate = (value: string) =>
 export const getProject = (id: string) =>
   projects.find((project) => project.id === id) ?? projects[0];
 export const statusLabels: Record<ChangeStatus, string> = {
-  submitted: "Office review",
-  awaiting_client: "Awaiting approval",
+  submitted: "Submitted",
+  in_review: "In review",
+  authorized_to_proceed: "Work authorized · estimate pending",
+  withdrawn: "Withdrawn",
+  awaiting_gc: "Awaiting approval",
   approved: "Approved",
-  rejected: "Declined",
+  declined: "Declined",
 };

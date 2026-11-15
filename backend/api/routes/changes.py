@@ -1,83 +1,228 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Form, UploadFile, File, HTTPException
-from schemas.changes import ChangeOut, Description, Severity, Status
-from services import store
+import os
+from typing import Annotated, Literal
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from schemas.changes import (
+    Description,
+    EstimatorReview,
+    ReviewTerms,
+    Severity,
+    Status,
+    Suggestion,
+    SuggestionRequest,
+    WorkspaceChangeOut,
+)
+from services import email, prototype_approval, store
 from services.photos import save_photo
+from core.config import UPLOAD_DIR, email_settings
 
 router = APIRouter(prefix="/api/v1", tags=["changes"])
+ProjectId = Literal["north-park", "harbor", "cedar"]
 
-@router.post("/changes", response_model=ChangeOut, status_code=201)
+
+@router.post("/changes", response_model=WorkspaceChangeOut, status_code=201)
 async def submit_change(
-    # CHANGED: Put Form() inside Annotated so FastAPI retains the shared
-    # description constraints while validating the incoming multipart fields.
     description: Annotated[Description, Form()],
     severity: Severity = Form(Severity.normal),
-    photo: UploadFile = File(...),
+    photos: list[UploadFile] = File(...),
+    title: Annotated[str, Form(max_length=120)] = "",
+    project_id: ProjectId = Form("north-park"),
+    submitted_by: Literal["contractor", "subcontractor"] = Form("contractor"),
 ):
-    # CHANGED: Previously photo.read() discarded the upload. Save the bytes
-    # first, then attach the generated storage key to the change record.
-    # Validation failures create neither a change nor an office notification.
-    photo_key = await save_photo(photo)
-    return store.create_change(description, severity, photo_key)
+    if not 1 <= len(photos) <= 10:
+        raise HTTPException(422, "Attach between 1 and 10 photos.")
+    keys = []
+    try:
+        for photo in photos:
+            keys.append(await save_photo(photo))
+        with store.atomic():
+            return store.create_change(
+                description, severity, keys, title.strip(), project_id, submitted_by
+            )
+    except BaseException:
+        for key in keys:
+            (UPLOAD_DIR / key).unlink(missing_ok=True)
+        raise
+    finally:
+        for photo in photos:
+            await photo.close()
 
-@router.get("/changes", response_model=list[ChangeOut])
+
+@router.get("/changes", response_model=list[WorkspaceChangeOut])
 def list_changes(status: Status | None = None):
-    # CHANGED: Status uses the existing enum, so invalid filters return 422
-    # instead of silently returning an empty inbox for a misspelled status.
-    items = list(store.CHANGES.values())
-    return [c for c in items if status is None or c["status"] == status]
+    with store.atomic():
+        return [
+            c for c in store.CHANGES.values() if status is None or c["status"] == status
+        ]
+
 
 @router.post("/changes/{change_id}/admin-approve")
-def admin_approve(change_id: str):
-    c = store.CHANGES.get(change_id)
-    if not c:
-        raise HTTPException(404, "Not found")
-    # CHANGED: Do not let another office approval reopen a completed change
-    # or issue a second client link for a change that is already under review.
-    if c["status"] != "submitted":
-        raise HTTPException(409, "This change has already been reviewed")
-    if c["severity"] == "high":
-        # Existing policy preserved: high priority can be approved by admin;
-        # normal priority moves to client review. This is not a new rule.
-        c["status"] = "approved"
-        # CHANGED: All notifications use the same helper in services/store.py.
-        store.notify("contractor", change_id, "Approved")
-        return {"status": "approved"}
-    c["status"] = "awaiting_client"
-    token = store.issue_client_token(change_id)
-    link = f"http://localhost:8081/approve?token={token}"
-    print("CLIENT LINK:", link)
-    store.notify("client", change_id, link)
-    return {"status": "awaiting_client"}
+def admin_approve(change_id: str, terms: ReviewTerms = Body(...)):
+    with store.atomic():
+        c = store.CHANGES.get(change_id)
+        if not c:
+            raise HTTPException(404, "Not found")
+        if c["status"] != "submitted":
+            raise HTTPException(409, "This change has already been reviewed")
+        c.update(
+            amount=terms.amount,
+            impact_days=terms.impact_days,
+            approved_scope=terms.scope or c["description"],
+        )
+        # Preserve the existing prototype urgent approval policy.
+        if c["severity"] == "high":
+            c["status"] = "approved"
+            store.add_event(
+                c,
+                "approved",
+                "Urgent change approved; work order updated",
+                "Office Manager",
+            )
+            store.notify(
+                "contractor", change_id, "Approved; project work order updated"
+            )
+        else:
+            c.update(status="awaiting_client", sent_for_approval=True)
+            token = store.issue_client_token(change_id)
+            link = (
+                os.getenv("APP_URL", "http://localhost:8081").rstrip("/")
+                + f"/approve?token={token}"
+            )
+            store.notify("client", change_id, link)
+            store.add_event(c, "awaiting_client", "Sent to approver", "Office Manager")
+        return {"status": c["status"]}
 
-@router.get("/approval-session", response_model=ChangeOut)
+
+@router.post("/changes/{change_id}/review", response_model=WorkspaceChangeOut)
+def estimator_review(change_id: str, terms: EstimatorReview = Body(...)):
+    """The estimator saves scope, proposed cost and timeline, and sends it on.
+
+    Reviewable from `submitted`, from `in_review`, and from
+    `authorized_to_proceed`: a fast-tracked change is authorized before the
+    estimate exists, so it still needs its terms added afterwards.
+    """
+    with store.atomic():
+        c = store.CHANGES.get(change_id)
+        if not c:
+            raise HTTPException(404, "Not found")
+        if c["status"] not in ("submitted", "in_review", "authorized_to_proceed"):
+            raise HTTPException(409, "This change is no longer open for review")
+        link = prototype_approval.record_review(
+            c,
+            terms.scope,
+            terms.proposed_cost_cents,
+            terms.requested_timeline_days,
+            terms.currency,
+        )
+        subject, body = email.approval_request(c, link)
+        sent = email.send(email_settings()["gc_address"], subject, body)
+        # The console link is the fallback and stays printed either way, so the
+        # demo works with no email key and when the provider is down.
+        print("GC LINK:", link, "(emailed)" if sent else "(not emailed)")
+        store.add_event(
+            c,
+            "awaiting_gc",
+            "Approval email sent to the GC" if sent else "GC link ready (email off)",
+            "System",
+        )
+        return c
+
+
+@router.post("/changes/{change_id}/authorize", response_model=WorkspaceChangeOut)
+def manager_authorize(change_id: str):
+    """Fast track: the manager lets work start before the estimate exists.
+
+    This authorizes work only. The GC still decides, so no timeout and no
+    authorization here ever approves a change.
+    """
+    with store.atomic():
+        c = store.CHANGES.get(change_id)
+        if not c:
+            raise HTTPException(404, "Not found")
+        if c["severity"] != "high":
+            raise HTTPException(409, "Only a high-priority change can be fast tracked")
+        if c["status"] not in ("submitted", "in_review"):
+            raise HTTPException(409, "This change is past the point of authorizing work")
+        prototype_approval.authorize_fast_track(c)
+        # A heads-up only. It carries no link, because there is nothing to
+        # decide until the estimator adds the cost.
+        subject, body = email.fast_track_notice(c)
+        email.send(email_settings()["gc_address"], subject, body)
+        return c
+
+
+@router.get("/approval-session", response_model=WorkspaceChangeOut)
 def approval_session(token: str):
-    c = store.change_for_token(token)
-    if not c:
-        # CHANGED: Tokens have no expiration check yet, so report "Invalid
-        # link" rather than claiming an expired link was detected.
-        raise HTTPException(404, "Invalid link")
-    return c
+    with store.atomic():
+        c = store.change_for_token(token)
+        if not c:
+            raise HTTPException(404, "Invalid link")
+        return c
 
-def _decide(token: str, new_status: str):
-    # Both client decision routes already share this function; retain it.
-    c = store.change_for_token(token)
-    if not c:
-        raise HTTPException(404, "Invalid link")
-    if c["status"] != "awaiting_client":
-        raise HTTPException(409, "Already decided")
-    c["status"] = new_status
-    # CHANGED: Reuse the same notification shape used by submission/review.
-    store.notify("contractor", c["id"], new_status)
-    return {"status": new_status}
+
+def _decide(token, approving):
+    with store.atomic():
+        c = store.change_for_token(token)
+        if not c:
+            raise HTTPException(404, "Invalid link")
+        # A change sent by /review waits in awaiting_gc; one sent by the legacy
+        # /admin-approve waits in awaiting_client. Both are a pending decision.
+        if c["status"] not in ("awaiting_gc", "awaiting_client"):
+            raise HTTPException(409, "Already decided")
+        # Answer a legacy request in legacy words so the merged frontend, which
+        # tests for "rejected", keeps working until U3 lands.
+        legacy = c["status"] == "awaiting_client"
+        if approving:
+            new_status = "approved"
+        else:
+            new_status = "rejected" if legacy else "declined"
+        c["status"] = new_status
+        title = (
+            "Change approved; work order updated" if approving else "Change declined"
+        )
+        store.add_event(c, new_status, title, "GC")
+        store.notify("contractor" if legacy else "office", c["id"], title)
+        return {"status": new_status}
+
 
 @router.post("/approval-session/approve")
-def client_approve(token: str): return _decide(token, "approved")
+def client_approve(token: str):
+    return _decide(token, True)
+
 
 @router.post("/approval-session/decline")
-def client_decline(token: str): return _decide(token, "rejected")
+def client_decline(token: str):
+    return _decide(token, False)
+
 
 @router.get("/notifications")
 def notifications(to: str):
-    return [n for n in store.NOTIFICATIONS if n["to"] == to]
+    with store.atomic():
+        return [n for n in store.NOTIFICATIONS if n["to"] == to]
+
+
+@router.get("/projects/{project_id}/work-order")
+def project_work_order(project_id: ProjectId):
+    # Derived from committed approvals: retries/reloads cannot double-count a change.
+    with store.atomic():
+        return store.work_order(project_id)
+
+
+@router.post("/changes/{change_id}/suggestion", response_model=Suggestion)
+def suggest(change_id: str, request: SuggestionRequest):
+    from services.suggestions import suggest_terms
+
+    with store.atomic():
+        c = store.CHANGES.get(change_id)
+        if not c:
+            raise HTTPException(404, "Not found")
+        if c["status"] != "submitted":
+            raise HTTPException(409, "This change has already been reviewed")
+        record = dict(c)
+    result = suggest_terms(record, request.original_scope)
+    with store.atomic():
+        c = store.CHANGES[change_id]
+        if c["status"] != "submitted":
+            raise HTTPException(409, "This change has already been reviewed")
+        c["suggestion"] = result.model_dump()
+        c["original_scope"] = request.original_scope
+    return result
