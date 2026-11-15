@@ -407,6 +407,35 @@ class ChangeSubmissionTests(unittest.TestCase):
         )
         self.assertEqual(decision.json(), {"status": "declined"})
 
+    def test_a_blank_or_malformed_email_url_never_blocks_review_or_authorization(self):
+        # Neither value reaches the network: both fail while the request is built.
+        for bad_url in ("", "not-a-url"):
+            env = {
+                "EMAIL_API_KEY": "test-key",
+                "GC_EMAIL": "gc@example.com",
+                "EMAIL_API_URL": bad_url,
+            }
+            with patch.dict("os.environ", env):
+                change = self.submit().json()
+                review = self.client.post(
+                    "/api/v1/changes/" + change["id"] + "/review",
+                    json={"proposed_cost_cents": 12345, "requested_timeline_days": 2},
+                )
+                self.assertEqual(review.status_code, 200, bad_url)
+                self.assertEqual(review.json()["status"], "awaiting_gc")
+                decision = self.client.post(
+                    "/api/v1/approval-session/approve",
+                    params={"token": self.gc_token()},
+                )
+                self.assertEqual(decision.json(), {"status": "approved"})
+
+                urgent = self.submit(severity="high").json()
+                authorized = self.client.post(
+                    "/api/v1/changes/" + urgent["id"] + "/authorize"
+                )
+                self.assertEqual(authorized.status_code, 200, bad_url)
+                self.assertEqual(authorized.json()["status"], "authorized_to_proceed")
+
     def test_fast_track_sends_a_heads_up_with_no_approval_link(self):
         _, response, sent = self.captured_email(
             {"EMAIL_API_KEY": "test-key", "GC_EMAIL": "gc@example.com"},

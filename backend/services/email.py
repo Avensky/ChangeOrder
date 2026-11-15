@@ -24,29 +24,32 @@ def send(to: str, subject: str, body: str) -> bool:
     normal local state: the console link is then the only delivery.
     """
     settings = email_settings()
-    if not settings["api_key"] or not to:
+    if not settings["api_key"] or not settings["api_url"] or not to:
         return False
 
-    request = urllib.request.Request(
-        settings["api_url"],
-        data=json.dumps(
-            {
-                "from": settings["sender"],
-                "to": [to],
-                "subject": subject,
-                "text": body,
-            }
-        ).encode(),
-        headers={
-            "Authorization": f"Bearer {settings['api_key']}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    # Everything from building the request onward is inside the try: a blank or
+    # malformed EMAIL_API_URL raises ValueError before any network call, and no
+    # email problem may ever stop or roll back a review or an authorization.
     try:
+        request = urllib.request.Request(
+            settings["api_url"],
+            data=json.dumps(
+                {
+                    "from": settings["sender"],
+                    "to": [to],
+                    "subject": subject,
+                    "text": body,
+                }
+            ).encode(),
+            headers={
+                "Authorization": f"Bearer {settings['api_key']}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             return 200 <= response.status < 300
-    except (urllib.error.URLError, TimeoutError, OSError) as error:
+    except Exception as error:
         # Report the failure without echoing the request, which carries the key.
         print(f"EMAIL FAILED: {type(error).__name__}. The console link still works.")
         return False
