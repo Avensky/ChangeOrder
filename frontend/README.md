@@ -1,3 +1,21 @@
+## Expo SDK 58
+
+This frontend targets SDK 58 for the current iOS Expo Go app. Use Node.js 22.13+ on the 22 line, 24.3+ on the 24 line, or 26+ (odd-numbered releases are unsupported by Expo).
+
+After pulling the SDK upgrade, stop the existing Expo server and run from `frontend/`:
+
+```bash
+npm ci
+npx expo install --check
+npx expo start --clear --lan
+```
+
+Open the new QR code with Expo Go on the iPhone. A 57.x patch update will not fix a phone requiring SDK 58. Keep the PC and phone on the same network; preserve your local `.env` configuration.
+
+Checks: `npm run typecheck`, `npm run lint`, and `npx expo-doctor`. Native iPhone testing is still required after any SDK upgrade, including photo selection/capture, navigation, and opening the external GC link.
+
+---
+
 # Welcome to your Expo app 👋
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
