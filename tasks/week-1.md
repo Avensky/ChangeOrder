@@ -30,7 +30,7 @@ Order of the main chain: B2 (schema), then B3 (repository layer), then J4 (route
 ## B3 Repository layer
 
 - **Owner:** Bona. **Due:** Mon Nov 16. **Depends on:** B2 (publish the function signatures and an in-memory version by Fri Nov 13 so Jalen can start).
-- **Task:** Add repository functions with the same names and behaviour as the public functions in `backend/services/store.py` (the prototype on `main`), backed by the B2 tables. A setting (for example `WORKSPACE_BACKEND=sqlite|postgres`) chooses the store, so `main` stays demoable until cutover. The repository should create a change, list changes, record the estimator's review, authorize a fast-track change, send to the GC, record the GC's decision, and read and write notifications. Every function takes the company and filters by it. This replaces `backend/services/store.py`.
+- **Task:** Add repository functions with the same names and behaviour as the public functions in `backend/services/store.py` (the prototype on `main`), backed by the B2 tables. A setting (for example `WORKSPACE_BACKEND=sqlite|postgres`) chooses the store, so `main` stays demoable until cutover. The repository should create a change, list changes, record the estimator's review, authorize a fast-track change, send to the GC, record the GC's decision, and read and write notifications. Every function takes the company and filters by it. Until cutover both stores exist; remove `backend/services/store.py` only after the full workflow passes on Supabase.
 - **Done when:** Jalen's routes call it and data survives a backend restart.
 - **May edit:** `backend/db/repository.py` (new), `backend/db/database.py`.
 - **Spec:** Data model and storage; Workflow and approval rules.
@@ -99,8 +99,8 @@ Order of the main chain: B2 (schema), then B3 (repository layer), then J4 (route
 ## J5 Role checks on routes
 
 - **Owner:** Jalen. **Due:** Mon Nov 16. **Depends on:** B7.
-- **Task:** Verify the Supabase sign-in token on the backend and enforce the caller's role on each route: field submits, estimator reviews, manager authorizes. The GC link stays token-only.
-- **Done when:** A wrong role gets a 403, and the GC link still works without an account.
+- **Task:** Verify the Supabase sign-in token on the backend and enforce the caller's role on each route: field submits, estimator reviews, manager authorizes. The GC link stays token-only. Also add `GET /api/v1/me`, which returns the signed-in user's id, name and role (looked up from the verified token's `sub`, never from the request), so the app can show the right screens (U6). Agree the response shape with Uriel and add it to `docs/openapi.json`.
+- **Done when:** A wrong role gets a 403, the GC link still works without an account, and `GET /api/v1/me` returns the caller's id, name and role for a valid token and 401 without one.
 - **May edit:** `backend/api/`, `backend/core/`, `backend/tests/`.
 - **Spec:** API and security.
 
