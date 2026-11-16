@@ -1,5 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  // NativeWind web initializes its color-scheme setter when Metro injects CSS.
+  // Class mode supports that setter; media mode throws during late injection.
+  darkMode: "class",
   content: ["./src/**/*.{js,jsx,ts,tsx}"],
   presets: [require("nativewind/preset")],
   theme: {
