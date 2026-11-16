@@ -84,10 +84,13 @@ export function Card({
 }
 
 const statusClasses: Record<ChangeStatus, { box: string; text: string }> = {
+  in_review: { box: "bg-slate-100", text: "text-slate-600" },
+  authorized_to_proceed: { box: "bg-amber-50", text: "text-amber-800" },
+  withdrawn: { box: "bg-slate-100", text: "text-slate-600" },
   submitted: { box: "bg-slate-100", text: "text-slate-600" },
-  awaiting_client: { box: "bg-amber-50", text: "text-amber-800" },
+  awaiting_gc: { box: "bg-amber-50", text: "text-amber-800" },
   approved: { box: "bg-emerald-50", text: "text-emerald-800" },
-  rejected: { box: "bg-rose-50", text: "text-rose-700" },
+  declined: { box: "bg-rose-50", text: "text-rose-700" },
 };
 
 export function StatusBadge({ status }: { status: ChangeStatus }) {
@@ -100,7 +103,7 @@ export function StatusBadge({ status }: { status: ChangeStatus }) {
         <Check size={11} color="#166534" />
       ) : (
         <View
-          className={`h-1.5 w-1.5 rounded-full ${status === "awaiting_client" ? "bg-amber-500" : status === "rejected" ? "bg-rose-400" : "bg-slate-400"}`}
+          className={`h-1.5 w-1.5 rounded-full ${status === "awaiting_gc" ? "bg-amber-500" : status === "declined" ? "bg-rose-400" : "bg-slate-400"}`}
         />
       )}
       <Text className={`text-[10px] font-semibold ${colors.text}`}>

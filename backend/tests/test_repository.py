@@ -9,7 +9,8 @@ Supabase, no DATABASE_URL.
 import hashlib
 import os
 import unittest
-from datetime import timedelta
+import uuid
+from datetime import datetime, timedelta
 
 from sqlalchemy import event, text
 from sqlalchemy.exc import IntegrityError
@@ -28,6 +29,7 @@ from db.models import (
     User,
     utc_now,
 )
+from schemas.changes import WorkspaceChangeOut
 
 
 def make_engine():
@@ -325,6 +327,229 @@ class RepositoryTests(unittest.TestCase):
         with self.assertRaises(repository.NotFound):
             with repository.atomic(self.cid):
                 repository.decide(fresh, "approved")
+
+    # terms, currency and authorization in the change dict (WorkspaceChangeOut)
+    def test_new_change_has_no_terms_and_no_authorization(self):
+        change = self.submit("high")
+        for key in ("proposed_cost_cents", "requested_timeline_days", "authorized_at", "authorized_by"):
+            self.assertIn(key, change)
+            self.assertIsNone(change[key], key)
+        self.assertEqual(change["currency"], "USD")
+        self.assertEqual((change["amount"], change["impact_days"]), (0, 0))
+        WorkspaceChangeOut.model_validate(change)
+
+    def test_terms_and_currency_appear_after_review_and_on_the_gc_link(self):
+        change = self.submit()
+        with repository.atomic(self.cid):
+            repository.record_review(
+                change["id"], "Draft scope", impact_days=2, proposed_cost_cents=12345, currency="CAD"
+            )
+            draft = repository.get_change(change["id"])
+        self.assertEqual(draft["status"], "in_review")
+        self.assertEqual(
+            (draft["proposed_cost_cents"], draft["requested_timeline_days"], draft["currency"]),
+            (12345, 2, "CAD"),
+        )
+        # the dollar fields the app still reads say the same thing
+        self.assertEqual((draft["amount"], draft["impact_days"]), (123.45, 2))
+        self.assertIsNone(draft["authorized_at"])
+        self.assertIsNone(draft["authorized_by"])
+        # every field of the API's response model is in the dict, by the same name
+        self.assertLessEqual(set(WorkspaceChangeOut.model_fields), set(draft))
+        WorkspaceChangeOut.model_validate(draft)
+
+        with repository.atomic(self.cid):
+            token = repository.send_to_gc(
+                change["id"], "Final scope", impact_days=3, proposed_cost_cents=20050, currency="EUR"
+            )["token"]
+        with repository.atomic():  # as the GC: no company named
+            seen = repository.change_for_token(token)
+        self.assertEqual(
+            (seen["proposed_cost_cents"], seen["requested_timeline_days"], seen["currency"]),
+            (20050, 3, "EUR"),
+        )
+        self.assertEqual((seen["amount"], seen["impact_days"], seen["approved_scope"]), (200.5, 3, "Final scope"))
+        self.assertEqual(seen["status"], "awaiting_client")  # legacy name, unchanged
+        WorkspaceChangeOut.model_validate(seen)
+        with Session(self.engine) as s:
+            row = s.execute(
+                text("SELECT proposed_cost_cents, currency, requested_timeline_days FROM change_order_revision")
+            ).one()
+        self.assertEqual(tuple(row), (20050, "EUR", 3))
+
+    def test_currency_defaults_to_usd_and_the_dollars_path_still_works(self):
+        change = self.submit()
+        self.send(change, amount=123.45, days=2)
+        with repository.atomic(self.cid):
+            saved = repository.get_change(change["id"])
+        self.assertEqual(
+            (saved["proposed_cost_cents"], saved["currency"], saved["amount"]), (12345, "USD", 123.45)
+        )
+
+    def test_integer_cents_are_stored_exactly_without_a_float(self):
+        change = self.submit()
+        exact = 9_007_199_254_740_993  # 2**53 + 1: a float cannot hold this
+        self.assertNotEqual(int(float(exact)), exact)
+        with repository.atomic(self.cid):
+            repository.record_review(change["id"], None, impact_days=0, proposed_cost_cents=exact)
+            self.assertEqual(repository.get_change(change["id"])["proposed_cost_cents"], exact)
+
+    def test_currency_and_cents_are_validated_and_nothing_is_saved(self):
+        change = self.submit()
+        for currency in ("usd", "US", "USDX", "U$D", "US1", " USD", "USD\n", "", None, 840):
+            with self.subTest(currency=currency):
+                with self.assertRaises(ValueError):
+                    with repository.atomic(self.cid):
+                        repository.record_review(change["id"], "s", 10, 1, currency=currency)
+                with self.assertRaises(ValueError):
+                    with repository.atomic(self.cid):
+                        repository.send_to_gc(change["id"], "s", 10, 1, currency=currency)
+        for cents in (-1, 10.5, "100", True):
+            with self.subTest(cents=cents):
+                with self.assertRaises(ValueError):
+                    with repository.atomic(self.cid):
+                        repository.record_review(change["id"], "s", impact_days=1, proposed_cost_cents=cents)
+        with self.assertRaises(ValueError):  # dollars and cents that disagree
+            with repository.atomic(self.cid):
+                repository.send_to_gc(change["id"], "s", 10, 1, proposed_cost_cents=1001)
+        with repository.atomic(self.cid):
+            saved = repository.get_change(change["id"])
+        self.assertEqual(saved["status"], "submitted")
+        self.assertIsNone(saved["proposed_cost_cents"])
+        self.assertEqual(self.count(ApprovalLink), 0)
+        with Session(self.engine) as s:
+            self.assertEqual(s.execute(text("SELECT count(*) FROM change_order_revision")).scalar_one(), 0)
+        # dollars and cents that agree are accepted
+        with repository.atomic(self.cid):
+            repository.record_review(change["id"], "s", 10, 1, proposed_cost_cents=1000)
+            self.assertEqual(repository.get_change(change["id"])["proposed_cost_cents"], 1000)
+
+    def test_authorization_fields_appear_after_fast_track_and_stay(self):
+        urgent = self.submit("high")
+        with Session(self.engine) as s:
+            second = User(company_id=self.cid, role="manager", name="Second Manager")
+            s.add(second)
+            s.commit()
+            second_id = second.id
+        before = utc_now()
+        with repository.atomic(self.cid):
+            repository.authorize_to_proceed(urgent["id"], actor_name="Second Manager", actor_user_id=second_id)
+            saved = repository.get_change(urgent["id"])
+        self.assertEqual(saved["status"], "authorized_to_proceed")
+        self.assertEqual(saved["authorized_by"], "Second Manager")
+        stamp = datetime.fromisoformat(saved["authorized_at"])
+        self.assertIsNotNone(stamp.tzinfo)
+        self.assertLess(abs(stamp - before), timedelta(minutes=1))
+        # authorizing is not an estimate: no terms yet
+        self.assertIsNone(saved["proposed_cost_cents"])
+        self.assertIsNone(saved["requested_timeline_days"])
+        self.assertEqual(saved["currency"], "USD")
+        WorkspaceChangeOut.model_validate(saved)
+
+        with repository.atomic(self.cid):
+            repository.record_review(urgent["id"], "s", impact_days=4, proposed_cost_cents=99900)
+            reviewed = repository.get_change(urgent["id"])
+            token = repository.send_to_gc(urgent["id"], "s", impact_days=4, proposed_cost_cents=99900)["token"]
+            self.assertEqual(repository.decide(token, "declined"), {"status": "rejected"})
+            final = repository.get_change(urgent["id"])
+        self.assertEqual(reviewed["status"], "authorized_to_proceed")
+        self.assertEqual((reviewed["proposed_cost_cents"], reviewed["requested_timeline_days"]), (99900, 4))
+        self.assertEqual(final["status"], "rejected")  # legacy name, unchanged
+        for change in (reviewed, final):
+            self.assertEqual(
+                (change["authorized_by"], change["authorized_at"]),
+                ("Second Manager", saved["authorized_at"]),
+            )
+        WorkspaceChangeOut.model_validate(final)
+
+    def test_default_authorizer_is_the_first_manager(self):
+        urgent = self.submit("high")
+        with repository.atomic(self.cid):
+            repository.authorize_to_proceed(urgent["id"])
+            self.assertEqual(repository.get_change(urgent["id"])["authorized_by"], "Max Manager")
+
+    def test_legacy_status_names_are_unchanged(self):
+        sent, declined = self.submit(), self.submit()
+        self.send(sent)
+        token = self.send(declined)["token"]
+        with repository.atomic(self.cid):
+            self.assertEqual(repository.decide(token, "rejected"), {"status": "rejected"})
+            statuses = [c["status"] for c in repository.list_changes()]
+            kinds = [h["kind"] for c in repository.list_changes() for h in c["history"]]
+            self.assertEqual(len(repository.list_changes("awaiting_client")), 1)
+            self.assertEqual(len(repository.list_changes("rejected")), 1)
+        self.assertEqual(statuses, ["awaiting_client", "rejected"])
+        self.assertEqual(kinds, ["submitted", "awaiting_client", "submitted", "awaiting_client", "rejected"])
+        self.assertNotIn("awaiting_gc", statuses + kinds)
+        self.assertNotIn("declined", statuses + kinds)
+        with Session(self.engine) as s:  # the database holds the v2 names
+            stored = [r[0] for r in s.execute(text("SELECT status FROM change_event ORDER BY id"))]
+        self.assertEqual(stored, ["awaiting_gc", "declined"])
+
+    # sign-in: the caller behind a Supabase user id
+    def seed_callers(self):
+        ids = {name: uuid.uuid4() for name in ("field", "estimator", "other")}
+        with Session(self.engine) as s:
+            for user in s.exec(select(User).where(User.company_id == self.cid)).all():
+                if user.name == "Contractor":
+                    user.auth_user_id = ids["field"]
+                elif user.role == "estimator":
+                    user.auth_user_id = ids["estimator"]
+                s.add(user)
+            s.add(User(company_id=self.other_id, role="manager", name="Other Manager", auth_user_id=ids["other"]))
+            s.commit()
+        return ids
+
+    def test_caller_for_auth_user_finds_the_user_across_companies(self):
+        ids = self.seed_callers()
+        # outside atomic(): it opens its own session
+        field = repository.caller_for_auth_user(str(ids["field"]))
+        self.assertEqual(set(field), {"id", "company_id", "role", "name"})
+        self.assertEqual((field["company_id"], field["role"], field["name"]), (self.cid, "field", "Contractor"))
+        self.assertIsInstance(field["id"], int)
+        estimator = repository.caller_for_auth_user(str(ids["estimator"]))
+        self.assertEqual((estimator["company_id"], estimator["role"]), (self.cid, "estimator"))
+        # the company comes from the row, not from a setting or the transaction
+        other = repository.caller_for_auth_user(str(ids["other"]))
+        self.assertEqual((other["company_id"], other["role"], other["name"]), (self.other_id, "manager", "Other Manager"))
+        with unittest_env(WORKSPACE_COMPANY_ID=str(self.cid)):
+            self.assertEqual(repository.caller_for_auth_user(str(ids["other"])), other)
+        with repository.atomic(self.cid):
+            self.assertEqual(repository.caller_for_auth_user(str(ids["other"])), other)
+            self.assertEqual(repository._ctx().company_id, self.cid)  # the transaction is not moved
+        # other spellings of the same UUID
+        self.assertEqual(repository.caller_for_auth_user(str(ids["field"]).upper()), field)
+        self.assertEqual(repository.caller_for_auth_user(ids["field"]), field)
+
+    def test_caller_id_and_company_drive_a_submission(self):
+        ids = self.seed_callers()
+        caller = repository.caller_for_auth_user(str(ids["field"]))
+        with repository.atomic(caller["company_id"]):
+            change = repository.create_change(
+                "d", "normal", ["caller.png"], submitted_by_user_id=caller["id"]
+            )
+        self.assertEqual(change["author"], caller["name"])
+
+    def test_caller_for_auth_user_is_none_for_unknown_or_malformed_ids(self):
+        self.seed_callers()
+        for value in (str(uuid.uuid4()), "not-a-uuid", "", "1", "' OR 1=1 --", None, 42, b"x"):
+            with self.subTest(value=value):
+                self.assertIsNone(repository.caller_for_auth_user(value))
+
+    def test_caller_for_auth_user_never_returns_a_gc(self):
+        # The schema refuses a gc with an account; the lookup refuses one too.
+        gc_id = uuid.uuid4()
+        with Session(self.engine) as s:
+            with self.assertRaises(IntegrityError):
+                s.add(User(company_id=self.cid, role="gc", name="GC With Account", auth_user_id=gc_id))
+                s.commit()
+        with Session(self.engine) as s:
+            s.execute(text("PRAGMA ignore_check_constraints = ON"))
+            s.add(User(company_id=self.cid, role="gc", name="GC With Account", auth_user_id=gc_id))
+            s.commit()
+            s.execute(text("PRAGMA ignore_check_constraints = OFF"))
+            self.assertEqual(len(s.exec(select(User).where(User.auth_user_id == gc_id)).all()), 1)
+        self.assertIsNone(repository.caller_for_auth_user(str(gc_id)))
 
     # suggestions
     def test_ai_suggestion_is_saved_but_changes_nothing_else(self):

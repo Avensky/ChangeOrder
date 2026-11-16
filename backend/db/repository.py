@@ -25,7 +25,9 @@ already reviewed). A Conflict rolls the transaction back, as the prototype did.
 
 import hashlib
 import os
+import re
 import secrets
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -39,6 +41,7 @@ from sqlmodel import Session, col, select
 
 from .database import company_select, get_engine
 from .models import (
+    DEFAULT_CURRENCY,
     AiSuggestion,
     ApprovalDecision,
     ApprovalLink,
@@ -77,6 +80,8 @@ _SUBMITTER_LABELS = ("contractor", "subcontractor")
 
 DEFAULT_FIRST_NUMBER = 1049  # the prototype's first code, CO-1049
 DEFAULT_LINK_DAYS = 14
+# Three uppercase letters, the same rule as schemas.changes.Currency.
+_CURRENCY_CODE = re.compile(r"[A-Z]{3}")
 
 REVIEWABLE = ("submitted", "in_review", "authorized_to_proceed")
 
@@ -157,6 +162,42 @@ def _ctx() -> _Context:
     if context is None:
         raise RuntimeError("Call repository functions inside `with repository.atomic():`.")
     return context
+
+
+# ------------------------------------------------------------------ sign-in
+
+
+def caller_for_auth_user(auth_user_id) -> dict | None:
+    """The staff user behind a verified Supabase token, or None.
+
+    auth_user_id is the token's "sub" (a UUID string). Returns
+    {"id", "company_id", "role", "name"}; the company comes from the user's
+    row, so this is the one lookup that is not filtered by company: it is how
+    the company is learned. Pass that company_id to atomic().
+
+    Works outside atomic(): it opens its own short read-only session. Unknown
+    and malformed ids return None. A GC is never returned: they have no account.
+    """
+    try:
+        key = auth_user_id if isinstance(auth_user_id, uuid.UUID) else uuid.UUID(auth_user_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    query = select(User).where(User.auth_user_id == key).where(User.role != "gc")
+
+    def found(session: Session) -> dict | None:
+        user = session.exec(query).first()
+        if user is None:
+            return None
+        return dict(id=user.id, company_id=user.company_id, role=user.role, name=user.name)
+
+    active = _current.get()
+    if active is not None:
+        # Inside a transaction, read through it rather than a second connection.
+        return found(active.session)
+    bind = _engine_override or get_engine()
+    options = {"join_transaction_mode": "create_savepoint"} if isinstance(bind, Connection) else {}
+    with Session(bind, **options) as session:
+        return found(session)
 
 
 # ------------------------------------------------------------------ helpers
@@ -358,6 +399,16 @@ def _build(events: list[ChangeEvent]) -> list[dict]:
             sent_for_approval=bool(revision and revision.frozen_at),
             history=history.get(event.id, []),
             suggestion=None,
+            # The same terms as the schema stores them (WorkspaceChangeOut). None
+            # until a review is saved, so a link can show "no estimate yet".
+            proposed_cost_cents=revision.proposed_cost_cents if revision else None,
+            requested_timeline_days=revision.requested_timeline_days if revision else None,
+            currency=revision.currency if revision else DEFAULT_CURRENCY,
+            # Fast track only: when a manager let work start, and who.
+            authorized_at=_iso(event.authorized_at) if event.authorized_at else None,
+            authorized_by=(
+                users[event.authorized_by_id].name if event.authorized_by_id is not None else None
+            ),
         )
         if revision:
             change["approved_scope"] = revision.scope
@@ -559,11 +610,44 @@ def create_change(
 # ----------------------------------------------------------------- review
 
 
-def _write_terms(event: ChangeEvent, scope, amount, impact_days, freeze: bool):
+def _terms_cents(amount, proposed_cost_cents) -> int:
+    """The proposed cost in cents, from integer cents or from dollars.
+
+    Integer cents are used as given, so they never pass through a float. When
+    both are given they must say the same amount. Neither means no cost: 0.
+    """
+    if proposed_cost_cents is None:
+        return _cents(0 if amount is None else amount)
+    if isinstance(proposed_cost_cents, bool) or not isinstance(proposed_cost_cents, int):
+        raise ValueError("proposed_cost_cents must be a whole number of cents.")
+    if proposed_cost_cents < 0:
+        raise ValueError("proposed_cost_cents must not be negative.")
+    if amount is not None and _cents(amount) != proposed_cost_cents:
+        raise ValueError("amount and proposed_cost_cents disagree; pass one of them.")
+    return proposed_cost_cents
+
+
+def _currency(value) -> str:
+    """A currency code: exactly three uppercase letters, for example USD."""
+    if not isinstance(value, str) or not _CURRENCY_CODE.fullmatch(value):
+        raise ValueError("currency must be three uppercase letters, for example USD.")
+    return value
+
+
+def _write_terms(
+    event: ChangeEvent,
+    scope,
+    amount,
+    impact_days,
+    freeze: bool,
+    currency: str = DEFAULT_CURRENCY,
+    proposed_cost_cents: int | None = None,
+):
     """Save the proposal on the change's latest unsent revision, or start one."""
     context = _ctx()
     session, company = context.session, context.company_id
-    cents = _cents(amount)
+    cents = _terms_cents(amount, proposed_cost_cents)
+    currency = _currency(currency)
     if impact_days < 0:
         raise ValueError("impact_days must not be negative")
     order = session.exec(
@@ -592,6 +676,7 @@ def _write_terms(event: ChangeEvent, scope, amount, impact_days, freeze: bool):
         )
     revision.scope = scope or event.description
     revision.proposed_cost_cents = cents
+    revision.currency = currency
     revision.requested_timeline_days = impact_days
     if freeze:
         revision.frozen_at = utc_now()
@@ -601,18 +686,36 @@ def _write_terms(event: ChangeEvent, scope, amount, impact_days, freeze: bool):
 
 
 def record_review(
-    change_id, scope, amount, impact_days, actor_name="Estimator", actor_user_id=None
+    change_id,
+    scope=None,
+    amount=None,
+    impact_days=0,
+    actor_name="Estimator",
+    actor_user_id=None,
+    *,
+    currency: str = DEFAULT_CURRENCY,
+    proposed_cost_cents: int | None = None,
 ) -> dict:
     """Save the estimator's proposal without sending it. Returns {"status": ...}.
 
-    The first save moves a submitted change to in_review. A fast-track change
-    that is already authorized_to_proceed keeps that status.
+    The cost is either amount (dollars) or proposed_cost_cents (integer cents,
+    preferred: it never passes through a float). currency is three uppercase
+    letters. The first save moves a submitted change to in_review. A fast-track
+    change that is already authorized_to_proceed keeps that status.
     """
     context = _ctx()
     event = _lock_change(change_id)
     if event.status not in REVIEWABLE:
         raise Conflict("This change has already been reviewed")
-    _write_terms(event, scope, amount, impact_days, freeze=False)
+    _write_terms(
+        event,
+        scope,
+        amount,
+        impact_days,
+        freeze=False,
+        currency=currency,
+        proposed_cost_cents=proposed_cost_cents,
+    )
     if event.status == "submitted":
         event.status = "in_review"
         context.session.add(event)
@@ -685,13 +788,20 @@ def _issue_link(request: ApprovalRequest) -> str:
 def send_to_gc(
     change_id,
     scope=None,
-    amount=0,
+    amount=None,
     impact_days=0,
     actor_name="Office Manager",
     actor_user_id=None,
     gc_user_id=None,
+    *,
+    currency: str = DEFAULT_CURRENCY,
+    proposed_cost_cents: int | None = None,
 ) -> dict:
     """Freeze the proposal, ask the GC to decide, and return the link token.
+
+    The cost is either amount (dollars) or proposed_cost_cents (integer cents,
+    preferred); currency is three uppercase letters. The terms passed here are
+    the ones sent: they replace an unsent draft saved by record_review.
 
     Returns {"status": "awaiting_client", "token": <raw token>}. The token is
     shown here once and stored nowhere (only its hash is); the route puts it in
@@ -702,7 +812,15 @@ def send_to_gc(
     event = _lock_change(change_id)
     if event.status not in REVIEWABLE:
         raise Conflict("This change has already been reviewed")
-    revision = _write_terms(event, scope, amount, impact_days, freeze=True)
+    revision = _write_terms(
+        event,
+        scope,
+        amount,
+        impact_days,
+        freeze=True,
+        currency=currency,
+        proposed_cost_cents=proposed_cost_cents,
+    )
     gcs = _users_with_roles("gc")
     if gc_user_id is not None:
         gcs = [u for u in gcs if u.id == int(gc_user_id)]

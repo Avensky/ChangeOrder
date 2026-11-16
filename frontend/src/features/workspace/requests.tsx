@@ -19,9 +19,11 @@ type QueueFilter = "all" | "decided" | ChangeStatus;
 const allFilters: readonly QueueFilter[] = [
   "all",
   "submitted",
-  "awaiting_client",
+  "in_review",
+  "authorized_to_proceed",
+  "awaiting_gc",
   "approved",
-  "rejected",
+  "declined",
 ];
 
 const queues: Record<
@@ -35,6 +37,7 @@ const queues: Record<
     sortLabel: string;
   }
 > = {
+  manager: { title: "Work authorizations", description: "Authorize high-priority work now. The estimator adds terms and the GC still decides the cost.", filters: allFilters, emptyTitle: "No requests", emptyDescription: "Field submissions will appear here.", sortLabel: "Latest submissions first" },
   contractor: {
     title: "Project requests",
     description:
@@ -56,7 +59,7 @@ const queues: Record<
     title: "Office review queue",
     description:
       "Work through incoming changes, starting with high-priority submissions.",
-    filters: ["submitted", "all", "awaiting_client", "approved", "rejected"],
+    filters: ["all", "submitted", "in_review", "authorized_to_proceed", "awaiting_gc", "approved", "declined"],
     emptyTitle: "No incoming requests",
     emptyDescription:
       "New submissions will appear here as the field team reports them.",
@@ -66,7 +69,7 @@ const queues: Record<
     title: "Approval queue",
     description:
       "Open a proposal to review its scope and terms. Use Decisions to see earlier outcomes.",
-    filters: ["awaiting_client", "decided", "all"],
+    filters: ["awaiting_gc", "decided", "all"],
     emptyTitle: "No decisions waiting",
     emptyDescription:
       "New proposals will appear after the office sends them for approval.",
@@ -77,7 +80,7 @@ const queues: Record<
 function matchesStatus(change: WorkspaceChange, filter: QueueFilter) {
   if (filter === "all") return true;
   if (filter === "decided") {
-    return change.status === "approved" || change.status === "rejected";
+    return change.status === "approved" || change.status === "declined";
   }
   return change.status === filter;
 }
@@ -87,7 +90,7 @@ function queueRank(change: WorkspaceChange, role: Role) {
     if (change.status !== "submitted") return 2;
     return change.severity === "high" ? 0 : 1;
   }
-  if (role === "approver") return change.status === "awaiting_client" ? 0 : 1;
+  if (role === "approver") return change.status === "awaiting_gc" ? 0 : 1;
   return 0;
 }
 
@@ -113,7 +116,7 @@ export function RequestsScreen() {
   const projectId = availableProjects.find(
     (project) => project.id === params.project,
   )?.id;
-  const showPriorityFilter = role === "contractor" || role === "office";
+  const showPriorityFilter = role === "manager" || role === "contractor" || role === "office";
   const highOnly = showPriorityFilter && params.high === "1";
   const search = query.trim().toLowerCase();
   const items = changes
