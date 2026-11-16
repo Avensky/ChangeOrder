@@ -19,14 +19,25 @@ from .models import TENANT_MODELS
 ModelT = TypeVar("ModelT", bound=SQLModel)
 
 
+def normalize_database_url(url: str) -> str:
+    """Name the PostgreSQL driver (psycopg 3) instead of relying on a default.
+
+    Supabase shows postgres:// connection strings. postgres:// and plain
+    postgresql:// become postgresql+psycopg://. A URL that already names a
+    driver (postgresql+psycopg2://) and any other database (sqlite://) are
+    returned unchanged. The URL is never logged.
+    """
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url.removeprefix(prefix)
+    return url
+
+
 def _database_url() -> str:
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not set. Add it to backend/.env; never commit it.")
-    # Supabase shows postgres:// connection strings; SQLAlchemy needs postgresql://.
-    if url.startswith("postgres://"):
-        url = "postgresql://" + url.removeprefix("postgres://")
-    return url
+    return normalize_database_url(url)
 
 
 def _enforce_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
