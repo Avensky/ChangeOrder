@@ -412,7 +412,8 @@ def _build(events: list[ChangeEvent]) -> list[dict]:
             # until a review is saved, so a link can show "no estimate yet".
             proposed_cost_cents=revision.proposed_cost_cents if revision else None,
             requested_timeline_days=revision.requested_timeline_days if revision else None,
-            currency=revision.currency if revision else DEFAULT_CURRENCY,
+            # With no terms yet, the currency the terms will have to be in.
+            currency=revision.currency if revision else projects[event.project_id].currency,
             # Fast track only: when a manager let work start, and who.
             authorized_at=_iso(event.authorized_at) if event.authorized_at else None,
             authorized_by=(

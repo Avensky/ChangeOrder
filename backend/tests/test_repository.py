@@ -534,6 +534,26 @@ class RepositoryTests(unittest.TestCase):
             self.review(first, "CAD")
         self.assertEqual(self.project_currency(), "EUR")
 
+    def test_change_without_terms_reports_its_project_currency(self):
+        before = self.submit("high")  # submitted while the project was still USD
+        self.assertEqual(before["currency"], "USD")
+        self.review(self.submit(), "CAD")  # another change settles the project on CAD
+        after = self.submit()
+        elsewhere = self.submit(project="harbor")
+        self.assertEqual((after["currency"], elsewhere["currency"]), ("CAD", "USD"))
+        with repository.atomic(self.cid):
+            repository.authorize_to_proceed(before["id"])  # fast track: still no terms
+            waiting = repository.get_change(before["id"])
+            listed = {c["id"]: c["currency"] for c in repository.list_changes()}
+        self.assertEqual((waiting["currency"], waiting["proposed_cost_cents"]), ("CAD", None))
+        self.assertEqual(listed[after["id"]], "CAD")
+        self.assertEqual(listed[elsewhere["id"]], "USD")
+        WorkspaceChangeOut.model_validate(waiting)
+        # the reported currency is the one the review will be accepted in
+        self.review(after, after["currency"])
+        with self.assertRaises(repository.CurrencyMismatch):
+            self.review(before, "USD")
+
     def test_project_with_a_base_budget_keeps_its_currency(self):
         with Session(self.engine) as s:
             project = s.exec(
