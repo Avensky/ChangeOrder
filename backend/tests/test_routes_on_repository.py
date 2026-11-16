@@ -175,6 +175,21 @@ class RoutesOnRepositoryTests(unittest.TestCase):
         self.assertEqual(body["proposed_cost_cents"], 100000001)
         self.assertEqual(body["currency"], "CAD")
 
+    def test_a_second_currency_in_a_project_is_refused_with_409(self):
+        # A project holds one currency (B3). The repository's CurrencyMismatch
+        # is a Conflict, so the route answers 409 and carries its message.
+        first = self.submit().json()
+        self.assertEqual(self.review(first["id"], currency="USD").status_code, 200)
+        second = self.submit().json()
+        refused = self.review(second["id"], currency="CAD")
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertIn("USD", refused.json()["detail"])
+        self.assertIn("CAD", refused.json()["detail"])
+        # Nothing was saved or sent for the refused change.
+        self.assertEqual(len(self.tokens), 1)
+        statuses = {c["id"]: c["status"] for c in self.client.get("/api/v1/changes").json()}
+        self.assertEqual(statuses[second["id"]], "submitted")
+
     def test_fast_track_authorizes_then_the_gc_still_decides(self):
         change = self.submit(severity="high").json()
         authorized = self.client.post(f"/api/v1/changes/{change['id']}/authorize")
