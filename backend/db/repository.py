@@ -20,7 +20,8 @@ the caller's verified token gives one; never take it from the request body.
 
 Errors are plain exceptions for the routes to turn into HTTP codes:
 NotFound -> 404, Conflict -> 409 (a retried or late decision, a change that was
-already reviewed). A Conflict rolls the transaction back, as the prototype did.
+already reviewed, a second currency in a project: CurrencyMismatch, which is a
+Conflict). A Conflict rolls the transaction back, as the prototype did.
 """
 
 import hashlib
@@ -92,6 +93,14 @@ class NotFound(LookupError):
 
 class Conflict(Exception):
     """The change is not in a state that allows this action (HTTP 409)."""
+
+
+class CurrencyMismatch(Conflict):
+    """The terms are in a different currency from the project's (HTTP 409).
+
+    A project holds one currency. A Conflict, so the routes' existing 409
+    handling covers it without a new case.
+    """
 
 
 # ------------------------------------------------------------ transactions
@@ -634,50 +643,112 @@ def _currency(value) -> str:
     return value
 
 
+def _hold_project_currency(event: ChangeEvent, currency: str, draft) -> None:
+    """One currency per project: refuse a second one, or let the first one set it.
+
+    draft is the unsent revision these terms will overwrite, or None. The
+    project's currency is settled once the project has a base budget or any
+    saved terms besides that draft. Until then the terms being saved set
+    project.currency (it starts as USD).
+    """
+    context = _ctx()
+    session, company = context.session, context.company_id
+    # Locked, so two first reviews in different currencies cannot both pass.
+    project = session.exec(
+        company_select(Project, company).where(Project.id == event.project_id).with_for_update()
+    ).one()
+    if currency == project.currency:
+        return
+    others = (
+        select(ChangeOrderRevision.id)
+        .join(
+            ChangeOrder,
+            (ChangeOrder.company_id == ChangeOrderRevision.company_id)
+            & (ChangeOrder.id == ChangeOrderRevision.change_order_id),
+        )
+        .join(
+            ChangeEvent,
+            (ChangeEvent.company_id == ChangeOrder.company_id)
+            & (ChangeEvent.id == ChangeOrder.change_event_id),
+        )
+        .where(ChangeOrderRevision.company_id == company)
+        .where(ChangeEvent.project_id == project.id)
+    )
+    if draft is not None:
+        others = others.where(ChangeOrderRevision.id != draft.id)
+    if project.base_budget_cents is not None or session.exec(others.limit(1)).first() is not None:
+        raise CurrencyMismatch(
+            f"This project is in {project.currency}; terms in {currency} cannot be added to it."
+        )
+    project.currency = currency
+    session.add(project)
+
+
 def _write_terms(
     event: ChangeEvent,
     scope,
     amount,
     impact_days,
     freeze: bool,
-    currency: str = DEFAULT_CURRENCY,
+    currency: str | None = DEFAULT_CURRENCY,
     proposed_cost_cents: int | None = None,
+    keep_draft: bool = False,
 ):
-    """Save the proposal on the change's latest unsent revision, or start one."""
+    """Save the proposal on the change's latest unsent revision, or start one.
+
+    keep_draft (send_to_gc): when no cost and no days are passed and a draft
+    exists, the draft's cost, days and currency are kept instead of zeroed.
+    """
     context = _ctx()
     session, company = context.session, context.company_id
-    cents = _terms_cents(amount, proposed_cost_cents)
-    currency = _currency(currency)
-    if impact_days < 0:
-        raise ValueError("impact_days must not be negative")
     order = session.exec(
         company_select(ChangeOrder, company).where(ChangeOrder.change_event_id == event.id)
     ).first()
+    revision = None
+    if order is not None:
+        revision = session.exec(
+            company_select(ChangeOrderRevision, company)
+            .where(ChangeOrderRevision.change_order_id == order.id)
+            .order_by(col(ChangeOrderRevision.revision_number).desc())
+        ).first()
+    if revision is not None and revision.frozen_at is not None:
+        raise Conflict("Sent terms cannot be overwritten")
+    no_terms = amount is None and proposed_cost_cents is None and impact_days is None
+    if keep_draft and no_terms and revision is not None:
+        if currency is not None and _currency(currency) != revision.currency:
+            raise CurrencyMismatch(
+                f"The saved draft is in {revision.currency}; "
+                f"pass the cost together with {currency} to replace it."
+            )
+        cents, days, currency = (
+            revision.proposed_cost_cents,
+            revision.requested_timeline_days,
+            revision.currency,
+        )
+        scope = scope or revision.scope
+    else:
+        cents = _terms_cents(amount, proposed_cost_cents)
+        currency = _currency(DEFAULT_CURRENCY if keep_draft and currency is None else currency)
+        days = 0 if impact_days is None else impact_days
+        if days < 0:
+            raise ValueError("impact_days must not be negative")
+        scope = scope or event.description
+    _hold_project_currency(event, currency, revision)
     if order is None:
         order = ChangeOrder(company_id=company, change_event_id=event.id)
         session.add(order)
         session.flush()
-    revisions = list(
-        session.exec(
-            company_select(ChangeOrderRevision, company)
-            .where(ChangeOrderRevision.change_order_id == order.id)
-            .order_by(ChangeOrderRevision.revision_number)
-        )
-    )
-    revision = revisions[-1] if revisions else None
-    if revision is not None and revision.frozen_at is not None:
-        raise Conflict("Sent terms cannot be overwritten")
     if revision is None:
         revision = ChangeOrderRevision(
             company_id=company,
             change_order_id=order.id,
             revision_number=1,
-            scope=scope or event.description,
+            scope=scope,
         )
-    revision.scope = scope or event.description
+    revision.scope = scope
     revision.proposed_cost_cents = cents
     revision.currency = currency
-    revision.requested_timeline_days = impact_days
+    revision.requested_timeline_days = days
     if freeze:
         revision.frozen_at = utc_now()
     session.add(revision)
@@ -700,8 +771,10 @@ def record_review(
 
     The cost is either amount (dollars) or proposed_cost_cents (integer cents,
     preferred: it never passes through a float). currency is three uppercase
-    letters. The first save moves a submitted change to in_review. A fast-track
-    change that is already authorized_to_proceed keeps that status.
+    letters and must be the project's: a project holds one currency, set by its
+    first saved terms, and a different one raises CurrencyMismatch (a Conflict).
+    The first save moves a submitted change to in_review. A fast-track change
+    that is already authorized_to_proceed keeps that status.
     """
     context = _ctx()
     event = _lock_change(change_id)
@@ -789,19 +862,26 @@ def send_to_gc(
     change_id,
     scope=None,
     amount=None,
-    impact_days=0,
+    impact_days=None,
     actor_name="Office Manager",
     actor_user_id=None,
     gc_user_id=None,
     *,
-    currency: str = DEFAULT_CURRENCY,
+    currency: str | None = None,
     proposed_cost_cents: int | None = None,
 ) -> dict:
     """Freeze the proposal, ask the GC to decide, and return the link token.
 
     The cost is either amount (dollars) or proposed_cost_cents (integer cents,
-    preferred); currency is three uppercase letters. The terms passed here are
-    the ones sent: they replace an unsent draft saved by record_review.
+    preferred); currency is three uppercase letters (USD when left out) and
+    must be the project's, else CurrencyMismatch (see record_review). Terms
+    passed here are the ones sent: they replace an unsent draft saved by
+    record_review.
+
+    With no terms (no amount, no proposed_cost_cents and no impact_days) the
+    saved draft is sent as it is: its cost, days and currency are kept, and its
+    scope too unless a scope is passed. With no terms and no draft, the request
+    goes out with a zero cost and zero days, as before.
 
     Returns {"status": "awaiting_client", "token": <raw token>}. The token is
     shown here once and stored nowhere (only its hash is); the route puts it in
@@ -820,6 +900,7 @@ def send_to_gc(
         freeze=True,
         currency=currency,
         proposed_cost_cents=proposed_cost_cents,
+        keep_draft=True,
     )
     gcs = _users_with_roles("gc")
     if gc_user_id is not None:
@@ -998,7 +1079,8 @@ def work_order(project_id) -> dict:
     """The project's approved additions, counted once each.
 
     Not stored: the changes whose approval decision is "approved", with the
-    revision the GC approved (see the query in migrations/README.md).
+    revision the GC approved (see the query in migrations/README.md). The
+    amounts are all in the project's one currency, returned as "currency".
     """
     context = _ctx()
     session, company = context.session, context.company_id
@@ -1039,9 +1121,14 @@ def work_order(project_id) -> dict:
             .order_by(Photo.id)
         ):
             photos.setdefault(photo.change_event_id, []).append(photo.storage_key)
+    currency = project.currency if project is not None else DEFAULT_CURRENCY
+    if any(revision.currency != currency for _, revision in rows):
+        # Cannot happen through this module; refuse rather than add up two currencies.
+        raise CurrencyMismatch(f"Project {project_id!r} has approved changes not in {currency}.")
     cents = sum((revision.proposed_cost_cents or 0) for _, revision in rows)
     return dict(
         project_id=project_id,
+        currency=currency,
         revision=len(rows),
         additional_amount=_dollars(cents),
         additional_days=sum((revision.requested_timeline_days or 0) for _, revision in rows),

@@ -401,6 +401,8 @@ class RepositoryTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     with repository.atomic(self.cid):
                         repository.record_review(change["id"], "s", 10, 1, currency=currency)
+                if currency is None:
+                    continue  # send_to_gc reads None as "not given": USD, or the draft's
                 with self.assertRaises(ValueError):
                     with repository.atomic(self.cid):
                         repository.send_to_gc(change["id"], "s", 10, 1, currency=currency)
@@ -423,6 +425,205 @@ class RepositoryTests(unittest.TestCase):
         with repository.atomic(self.cid):
             repository.record_review(change["id"], "s", 10, 1, proposed_cost_cents=1000)
             self.assertEqual(repository.get_change(change["id"])["proposed_cost_cents"], 1000)
+
+    # one currency per project
+    def review(self, change, currency="USD", cents=1000, days=1, company=None):
+        with repository.atomic(self.cid if company is None else company):
+            return repository.record_review(
+                change["id"], "Scope", impact_days=days, proposed_cost_cents=cents, currency=currency
+            )
+
+    def project_currency(self, slug="north-park", company=None):
+        with Session(self.engine) as s:
+            return s.exec(
+                select(Project.currency)
+                .where(Project.slug == slug)
+                .where(Project.company_id == (self.cid if company is None else company))
+            ).one()
+
+    def test_second_currency_is_refused_for_the_same_project(self):
+        first, second = self.submit(), self.submit()
+        self.review(first, "CAD")
+        self.assertEqual(self.project_currency(), "CAD")  # the first saved terms set it
+        self.assertTrue(issubclass(repository.CurrencyMismatch, repository.Conflict))  # HTTP 409
+        with self.assertRaises(repository.CurrencyMismatch) as refused:
+            self.review(second)  # the USD default is a second currency here
+        self.assertIn("CAD", str(refused.exception))
+        self.assertIn("USD", str(refused.exception))
+        with self.assertRaises(repository.CurrencyMismatch):
+            with repository.atomic(self.cid):
+                repository.send_to_gc(second["id"], "Scope", 10, 1, currency="EUR")
+        with self.assertRaises(repository.CurrencyMismatch):
+            with repository.atomic(self.cid):
+                repository.send_to_gc(second["id"], "Scope", 10, 1)  # USD when left out
+        # nothing was saved for the refused change, and the project did not move
+        with repository.atomic(self.cid):
+            saved = repository.get_change(second["id"])
+        self.assertEqual((saved["status"], saved["proposed_cost_cents"]), ("submitted", None))
+        self.assertEqual(self.count(ApprovalLink), 0)
+        self.assertEqual(self.project_currency(), "CAD")
+        with Session(self.engine) as s:
+            self.assertEqual(s.execute(text("SELECT count(*) FROM change_order_revision")).scalar_one(), 1)
+        # the project's own currency is accepted, on a draft and on a send
+        self.review(second, "CAD")
+        with repository.atomic(self.cid):
+            repository.send_to_gc(second["id"], "Scope", impact_days=1, proposed_cost_cents=500, currency="CAD")
+            self.assertEqual(repository.get_change(second["id"])["currency"], "CAD")
+        # a sent change still pins the currency for the changes that follow
+        with self.assertRaises(repository.CurrencyMismatch):
+            self.review(first, "USD")
+
+    def test_other_projects_and_companies_keep_their_own_currency(self):
+        self.review(self.submit(project="north-park"), "CAD")
+        harbor = self.submit(project="harbor")
+        self.review(harbor)  # USD default, in another project of the same company
+        self.assertEqual((self.project_currency("north-park"), self.project_currency("harbor")), ("CAD", "USD"))
+        with self.assertRaises(repository.CurrencyMismatch):
+            self.review(self.submit(project="harbor"), "CAD")
+        # another company's project with the same slug is a different project
+        self.seed_other_company()
+        with repository.atomic(self.other_id):
+            theirs = repository.create_change("Other job", "normal", ["theirs.png"], "T", "north-park")
+        self.review(theirs, "EUR", company=self.other_id)
+        self.assertEqual(self.project_currency("north-park", self.other_id), "EUR")
+        self.assertEqual(self.project_currency("north-park"), "CAD")
+        self.assertEqual(self.project_currency("cedar"), "USD")  # untouched
+
+    def test_usd_default_works_for_every_change_of_a_project(self):
+        tokens = []
+        for cents in (10000, 2550):
+            change = self.submit()
+            with repository.atomic(self.cid):
+                repository.record_review(change["id"], "Scope", impact_days=1, proposed_cost_cents=cents)
+                tokens.append(repository.send_to_gc(change["id"], "Scope", cents / 100, 1)["token"])
+        with repository.atomic(self.cid):
+            for token in tokens:
+                repository.decide(token, "approved")
+            order = repository.work_order("north-park")
+            self.assertEqual({c["currency"] for c in repository.list_changes()}, {"USD"})
+        self.assertEqual(
+            (order["currency"], order["revision"], order["additional_amount"]), ("USD", 2, 125.5)
+        )
+        self.assertEqual(self.project_currency(), "USD")
+
+    def test_work_order_returns_the_project_currency(self):
+        change = self.submit(project="harbor")
+        with repository.atomic(self.cid):
+            token = repository.send_to_gc(
+                change["id"], "Scope", impact_days=2, proposed_cost_cents=4200, currency="CAD"
+            )["token"]
+            repository.decide(token, "approved")
+            order = repository.work_order("harbor")
+            self.assertEqual(repository.work_order("cedar")["currency"], "USD")  # nothing reviewed yet
+            self.assertEqual(repository.work_order("unknown")["currency"], "USD")
+        self.assertEqual((order["currency"], order["additional_amount"], order["revision"]), ("CAD", 42.0, 1))
+        # the keys the app already reads are all still there
+        self.assertLessEqual(
+            {"project_id", "revision", "additional_amount", "additional_days", "changes"}, set(order)
+        )
+
+    def test_only_draft_of_a_project_may_still_change_currency(self):
+        first = self.submit()
+        self.review(first, "CAD")
+        self.review(first, "EUR")  # no other terms in the project yet: a correction
+        self.assertEqual(self.project_currency(), "EUR")
+        with repository.atomic(self.cid):
+            self.assertEqual(repository.get_change(first["id"])["currency"], "EUR")
+        self.review(self.submit(), "EUR")
+        with self.assertRaises(repository.CurrencyMismatch):  # now a second change holds EUR
+            self.review(first, "CAD")
+        self.assertEqual(self.project_currency(), "EUR")
+
+    def test_project_with_a_base_budget_keeps_its_currency(self):
+        with Session(self.engine) as s:
+            project = s.exec(
+                select(Project).where(Project.slug == "cedar").where(Project.company_id == self.cid)
+            ).one()
+            project.base_budget_cents = 5_000_000
+            s.add(project)
+            s.commit()
+        change = self.submit(project="cedar")
+        with self.assertRaises(repository.CurrencyMismatch):  # the budget is already in USD
+            self.review(change, "CAD")
+        self.review(change)
+        self.assertEqual(self.project_currency("cedar"), "USD")
+
+    def test_work_order_refuses_to_add_up_two_currencies(self):
+        change = self.submit()
+        token = self.send(change)["token"]
+        with repository.atomic(self.cid):
+            repository.decide(token, "approved")
+        with Session(self.engine) as s:  # only reachable by editing the data directly
+            s.execute(text("UPDATE change_order_revision SET currency = 'CAD'"))
+            s.commit()
+        with self.assertRaises(repository.CurrencyMismatch):
+            with repository.atomic(self.cid):
+                repository.work_order("north-park")
+
+    # sending without terms keeps the draft
+    def test_send_without_terms_keeps_the_draft(self):
+        change = self.submit()
+        with repository.atomic(self.cid):
+            repository.record_review(change["id"], "Draft scope", impact_days=2, proposed_cost_cents=12345)
+            token = repository.send_to_gc(change["id"])["token"]
+        with repository.atomic():
+            seen = repository.change_for_token(token)
+        self.assertEqual(
+            (seen["proposed_cost_cents"], seen["requested_timeline_days"], seen["currency"]),
+            (12345, 2, "USD"),
+        )
+        self.assertEqual((seen["amount"], seen["impact_days"]), (123.45, 2))
+        self.assertEqual(seen["approved_scope"], "Draft scope")
+        self.assertEqual(seen["status"], "awaiting_client")
+        self.assertTrue(seen["sent_for_approval"])
+        with Session(self.engine) as s:
+            self.assertEqual(s.execute(text("SELECT count(*) FROM change_order_revision")).scalar_one(), 1)
+        with repository.atomic():
+            repository.decide(token, "approved")
+            self.assertEqual(repository.work_order("north-park")["additional_amount"], 123.45)
+
+    def test_send_without_terms_keeps_the_draft_currency_and_takes_a_new_scope(self):
+        change = self.submit()
+        self.review(change, "CAD", cents=7700, days=5)
+        with self.assertRaises(repository.CurrencyMismatch):  # a currency without a cost
+            with repository.atomic(self.cid):
+                repository.send_to_gc(change["id"], currency="EUR")
+        with repository.atomic(self.cid):
+            repository.send_to_gc(change["id"], "Scope for the GC", None, None, "Erin Estimator")
+            sent = repository.get_change(change["id"])
+        self.assertEqual(
+            (sent["proposed_cost_cents"], sent["requested_timeline_days"], sent["currency"]),
+            (7700, 5, "CAD"),
+        )
+        self.assertEqual(sent["approved_scope"], "Scope for the GC")
+        self.assertEqual(sent["history"][-1]["person"], "Erin Estimator")
+
+    def test_send_with_terms_still_replaces_the_draft(self):
+        cases = (
+            (dict(amount=0, impact_days=0), (0, 0)),  # an explicit zero is terms
+            (dict(amount=50), (5000, 0)),
+            (dict(impact_days=4), (0, 4)),
+            (dict(proposed_cost_cents=250, impact_days=1), (250, 1)),
+        )
+        for terms, expected in cases:
+            with self.subTest(terms=terms):
+                change = self.submit()
+                self.review(change, cents=12345, days=2)
+                with repository.atomic(self.cid):
+                    repository.send_to_gc(change["id"], **terms)
+                    sent = repository.get_change(change["id"])
+                self.assertEqual((sent["proposed_cost_cents"], sent["requested_timeline_days"]), expected)
+                self.assertEqual(sent["approved_scope"], "Move the outlet left")  # as before: the report
+
+    def test_send_without_terms_and_without_a_draft_is_unchanged(self):
+        change = self.submit()
+        with repository.atomic(self.cid):
+            repository.send_to_gc(change["id"])
+            sent = repository.get_change(change["id"])
+        self.assertEqual(
+            (sent["proposed_cost_cents"], sent["requested_timeline_days"], sent["currency"]), (0, 0, "USD")
+        )
+        self.assertEqual(sent["approved_scope"], "Move the outlet left")
 
     def test_authorization_fields_appear_after_fast_track_and_stay(self):
         urgent = self.submit("high")
