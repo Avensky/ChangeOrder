@@ -34,7 +34,8 @@ class Caller:
     name: str
 
 
-# Set by the app at start-up (or by a test): sub (a UUID string) -> Caller or None.
+# sub (a UUID string) -> Caller or None. None here means the default below;
+# a test can set its own with configure_lookup.
 _lookup: Callable[[str], Caller | None] | None = None
 _jwks_client: PyJWKClient | None = None
 
@@ -42,6 +43,20 @@ _jwks_client: PyJWKClient | None = None
 def configure_lookup(lookup: Callable[[str], Caller | None] | None) -> None:
     global _lookup
     _lookup = lookup
+
+
+def _repository_lookup(sub: str) -> Caller | None:
+    """The staff user behind a verified token, from the repository (B3).
+
+    caller_for_auth_user is the one lookup not filtered by company: it is how
+    the company is learned. It never returns a GC, and unknown ids are None.
+    """
+    from db import repository
+
+    row = repository.caller_for_auth_user(sub)
+    if row is None:
+        return None
+    return Caller(id=row["id"], company_id=row["company_id"], role=row["role"], name=row["name"])
 
 
 def checks_enabled() -> bool:
@@ -93,9 +108,7 @@ def current_caller(authorization: str | None = Header(default=None)) -> Caller:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "Sign in first")
     sub = verify_access_token(authorization[7:].strip())
-    if _lookup is None:
-        raise HTTPException(503, "Staff lookup is not available on this server yet")
-    caller = _lookup(sub)
+    caller = (_lookup or _repository_lookup)(sub)
     if caller is None:
         raise HTTPException(403, "This account is not a ChangeOrder staff user")
     return caller

@@ -101,7 +101,8 @@ class AuthAndRoleTests(unittest.TestCase):
         self.keys = FakeKeySet(self.key)
         self.saved_keys = self.auth._jwks_client
         self.auth._jwks_client = self.keys
-        self.auth.configure_lookup(self.lookup)
+        # No test lookup: the routes use the repository's caller_for_auth_user.
+        self.auth.configure_lookup(None)
         self.patches = [patch.object(self.routes, "workflow", repository)]
         self.patches.append(patch("core.config.UPLOAD_DIR", UPLOAD_TMP))
         self.link_tokens = []
@@ -127,17 +128,6 @@ class AuthAndRoleTests(unittest.TestCase):
         self.environment.stop()
 
     # the database lookup this module asks Bona for, implemented for the test
-    def lookup(self, sub):
-        try:
-            auth_id = uuid.UUID(sub)
-        except ValueError:
-            return None
-        with Session(self.engine) as s:
-            user = s.exec(select(User).where(User.auth_user_id == auth_id)).first()
-            if user is None:
-                return None
-            return Caller(id=user.id, company_id=user.company_id, role=user.role, name=user.name)
-
     def token(self, who="estimator", *, sub=None, alg="ES256", key=None, exp=3600, aud="authenticated", iss=ISSUER, extra=None):
         now = int(time.time())
         payload = {
