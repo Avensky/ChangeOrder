@@ -1,11 +1,11 @@
 # Change Order: Specification v0.2
 
-**Date:** November 11, 2026; U5 corrections prepared November 14, 2026
+**Date:** November 11, 2026; U5 corrections prepared November 14, 2026; implementation status checked November 16, 2026
 **Status:** U5 review corrections for human review. The personas and fast-track rule below follow the Nov 11 team decisions and `AGENTS.md`; partner confirmation remains pending. [SPECIFICATIONS.MD](SPECIFICATIONS.MD) (v0.1, Oct 9) remains the historical design.
 
 ## Summary and what changed
 
-Version 0.2 folds in the Nov 4 workflow meeting and the Nov 5 data meeting, and distinguishes the agreed design from implementation status. The implementation snapshot below is checked against `main` after PRs #12, #13, #19 and #21; open PRs are not treated as shipped. Where sources conflict, the conflict is listed under [Open decisions](#open-decisions-and-assumptions) rather than silently resolved. v0.1 stays in the repository as the original design.
+Version 0.2 folds in the Nov 4 workflow meeting and the Nov 5 data meeting, and distinguishes the agreed design from implementation status. The implementation snapshot below is checked against `main` after PRs #12, #13, #14, #17, #19, #21, #25, #27 and #28; open PRs are not treated as shipped. Where sources conflict, the conflict is listed under [Open decisions](#open-decisions-and-assumptions) rather than silently resolved. v0.1 stays in the repository as the original design.
 
 The product is unchanged: a field worker photographs a change, the estimator prices it, and a general contractor approves it from an emailed link. What moved is who the people are called, that AI cost estimation is now central, and how approval works for urgent changes.
 
@@ -55,7 +55,7 @@ Priority decides the path. A normal change goes to the GC. A high-priority chang
 - A timeout never approves a change (carried from v0.1).
 - The canonical status set is `submitted`, `in_review`, `authorized_to_proceed` (fast track only), `awaiting_gc`, `approved`, `declined`, `withdrawn`. Legacy `awaiting_client` and `rejected` map to `awaiting_gc` and `declined`; compatibility code is not an extra product status set.
 - A manager's authorization is permission to start work, not approval of the cost. Only a GC decision approves or declines the proposal. A normal-priority report cannot use the authorize-now action.
-- Cost is integer cents plus currency. Requested timeline is a non-negative whole number of **calendar days**, including zero. A sent proposal revision is immutable; changed terms require a new revision and invalidate its old link.
+- Cost is integer cents plus currency. Requested timeline is a non-negative whole number of **calendar days**, including zero. A sent proposal revision is immutable; changed terms require a new revision and invalidate its old link. The repository keeps one currency per project; a conflicting currency raises a workflow conflict that the API must return as 409. Sending without new terms uses the saved draft (#28).
 
 ## Architecture and tech stack
 
@@ -85,7 +85,7 @@ flowchart TB
 | --- | --- | --- |
 | Front end | React Native with Expo, Tailwind styling | One codebase for iOS and Android; Expo Go on a physical phone avoids Windows emulator limits. Swift was ruled out as iOS only |
 | Backend | Python with FastAPI | Built; runs on port 8000 |
-| Database | PostgreSQL on Supabase through SQLModel | B2 schema reported applied by Bona; B3/J4 cutover remains unmerged and not live-verified in this review |
+| Database | PostgreSQL on Supabase through SQLModel | B2 schema and B3 repository merged; J4 route cutover is still open and the live workflow is not verified by this review |
 | Photos | Local disk in the running backend; private buckets planned | Public `/uploads` is a prototype limitation, not private evidence storage |
 | AI | AWS Bedrock with an S3-backed knowledge base | Later; depends on Tad's data |
 | Email | Configurable provider; J3 defaults to a Resend-compatible HTTPS payload | Merged with private console-link fallback; real delivery requires configured sender, recipient and provider |
@@ -95,9 +95,9 @@ The repository uses `backend/`, `frontend/` and `scripts/`, not the directory na
 
 ## Data model and storage
 
-PostgreSQL on Supabase is the target system of record. Bona reports the B2 migrations applied (13 domain tables plus migration bookkeeping); their PR remains separate from the live project. Existing applied migrations must not be edited or re-run as part of a merge. Fixes need a new reviewed migration owned by Bona. SQLModel's `create_all` does not alter existing tables.
+PostgreSQL on Supabase is the target system of record. Bona reports the B2 migrations applied (13 domain tables plus migration bookkeeping); the schema PR (#14) and repository PR (#17) are now merged. A code merge does not apply migrations to the live project. Existing applied migrations must not be edited or re-run as part of a merge. Fixes need a new reviewed migration owned by Bona. SQLModel's `create_all` does not alter existing tables.
 
-`main` currently persists the prototype workspace in local SQLite, so a restart alone does not prove Supabase integration. B3 (#17), J4 (#22) and the configured `WORKSPACE_BACKEND=postgres` must be integrated and exercised before claiming the full workflow uses Supabase. This review did not inspect or modify the shared database.
+`main` currently persists the prototype workspace in local SQLite, so a restart alone does not prove Supabase integration. B3 (#17) and its one-currency follow-up (#28) are merged. J4 (#22) and the configured `WORKSPACE_BACKEND=postgres` must be integrated and exercised before claiming the full workflow uses Supabase. This review did not inspect or modify the shared database.
 
 | Entity | State | Purpose |
 | --- | --- | --- |
@@ -160,7 +160,7 @@ The Oct 20 notes say bcrypt; the code uses SHA-256 on a random 32-byte token. SH
 
 ## API and security
 
-Implementation snapshot: `main` includes J2/J3 and U3/U4. The following routes are under `/api/v1` except `/health`. OpenAPI is the route contract; open PRs are not merged behavior.
+Implementation snapshot checked November 16: `main` includes J2/J3, U3/U4, B2/B3 and SDK 58. J4/J5 and U6 remain open PRs. The following routes are under `/api/v1` except `/health`. OpenAPI is the route contract; open PRs are not merged behavior.
 
 | Route or feature | State | Purpose |
 | --- | --- | --- |
@@ -170,13 +170,16 @@ Implementation snapshot: `main` includes J2/J3 and U3/U4. The following routes a
 | `POST /changes/{id}/authorize` | Merged, J2 | Manager authorizes open high-priority work before estimation; never approves the cost |
 | `GET /approval-session?token=` | Merged | GC views terms without an account; no decision on GET |
 | `POST /approval-session/approve` and `/decline` | Merged | Explicit GC decision |
+| `GET /projects/{project_id}/work-order` | Merged | Returns the project work order with approved change scope, amounts, days and photos; J4 switches the source to the repository |
+| `POST /changes/{id}/suggestion` | Merged optional prototype | Advisory scope/cost/timeline suggestion from original scope; estimator must review it. Photo-to-AI behavior conflicts with the current rule and remains an AI/backend follow-up |
 | `GET /notifications?to=` | Prototype | Stored alerts; tenant/user-scoped behavior must replace role-addressed prototype access |
 | `POST /changes/{id}/admin-approve` | Legacy only | Still directly approves urgent changes on the prototype, contrary to the agreed rule; merged U3 no longer calls it. J4 refuses that path on Postgres; removal/restriction remains backend work |
 | SQLite persistence | Merged prototype | Survives a backend restart; does not prove a real-database run |
-| PostgreSQL repository and routes | Open B3/J4 PRs | Requires repository integration and live restart/workflow verification |
+| PostgreSQL repository | Merged B3 (#17/#28) | Returns estimator terms/currency/authorization and provides the auth-user lookup; projects enforce one currency |
+| PostgreSQL route cutover | Open J4 (#22) | Requires integration and live restart/workflow verification |
 | `GET /me` and verified server roles | Open J5 (#23) | Returns `{id, name, role}` only after verifying a Supabase token and looking up the linked staff row |
 | Staff login / role navigation | Draft U6 (#24) | Supabase sign-in, bearer on staff requests, role from `/me`; anonymous GC page remains public |
-| SDK 58 / current iOS Expo Go | Open #25 | Needed for physical iPhone testing; SDK 57 cannot open in an SDK-58-only Expo Go app |
+| SDK 58 / current iOS Expo Go | Merged #25 | Required for the current iOS Expo Go app; physical workflow verification is still separate from successful bundling |
 
 U6 currently proposes memory-only sessions. Reloading or restarting the app requires sign-in again; token expiry or a staff API 401 also returns to sign-in. Automatic refresh and persistent sessions are not implemented by that draft. Rehearse this when using app reload as a demo fallback. Account creation and a successful mocked login do not establish a live end-to-end sign-in test.
 
