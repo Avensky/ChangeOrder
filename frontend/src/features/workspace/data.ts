@@ -1,6 +1,6 @@
 import type { ChangeOrder, Severity } from "@/features/change-orders/types";
 
-export type Role = "contractor" | "subcontractor" | "office" | "approver";
+export type Role = "manager" | "contractor" | "subcontractor" | "office" | "approver";
 export type SubmitterRole = Extract<Role, "contractor" | "subcontractor">;
 export type Mode = "demo" | "connected";
 export type ChangeStatus = ChangeOrder["status"];
@@ -48,6 +48,7 @@ export const roles: Record<
   Role,
   { label: string; person: string; initials: string; caption: string }
 > = {
+  manager: { label: "Manager", person: "Demo Manager", initials: "DM", caption: "Authorize urgent work before estimation" },
   contractor: {
     label: "Contractor",
     person: "Uriel Zacarias",
@@ -61,13 +62,13 @@ export const roles: Record<
     caption: "Report site changes and track submissions",
   },
   office: {
-    label: "Office Manager",
+    label: "Estimator",
     person: "Avery Morgan",
     initials: "AM",
     caption: "Review requests and prepare terms",
   },
   approver: {
-    label: "Approver",
+    label: "GC preview",
     person: "Jordan Ellis",
     initials: "JE",
     caption: "Review terms and record decisions",
@@ -88,9 +89,9 @@ export function visibleHistory(role: Role, change: WorkspaceChange) {
   return role === "approver"
     ? change.history.filter(
         (event) =>
-          event.kind === "awaiting_client" ||
+          event.kind === "awaiting_gc" ||
           event.kind === "approved" ||
-          event.kind === "rejected",
+          event.kind === "declined",
       )
     : change.history;
 }
@@ -164,7 +165,7 @@ const rows: [
     "Replace the specified lobby fixtures with dimmable recessed lights to match the revised lighting plan.",
     "harbor",
     "normal",
-    "awaiting_client",
+    "awaiting_gc",
     2400,
     1,
   ],
@@ -194,7 +195,7 @@ const rows: [
     "Provide two additional floor outlets below the conference table.",
     "harbor",
     "normal",
-    "awaiting_client",
+    "awaiting_gc",
     680,
     0,
   ],
@@ -204,7 +205,7 @@ const rows: [
     "Add three floating oak shelves beside the range hood.",
     "north-park",
     "normal",
-    "rejected",
+    "declined",
     720,
     0,
   ],
@@ -239,9 +240,9 @@ export function seedChanges(): WorkspaceChange[] {
       const time = `2026-10-${String(22 - Math.floor(i / 2)).padStart(2, "0")}T${String(16 - i).padStart(2, "0")}:20:00-07:00`;
       const submittedBy = i % 2 ? "subcontractor" : "contractor";
       const sentForApproval =
-        status === "awaiting_client" ||
-        status === "rejected" ||
-        (status === "approved" && severity === "normal");
+        status === "awaiting_gc" ||
+        status === "declined" ||
+        status === "approved";
       const history: Event[] = [
         {
           id: id + "-submitted",
@@ -261,9 +262,9 @@ export function seedChanges(): WorkspaceChange[] {
             : "Office review completed",
           person: roles.office.person,
           time,
-          kind: sentForApproval ? "awaiting_client" : "review",
+          kind: sentForApproval ? "awaiting_gc" : "review",
         });
-      if (status === "approved" || status === "rejected")
+      if (status === "approved" || status === "declined")
         history.push({
           id: id + "-decision",
           changeId: id,
@@ -309,8 +310,11 @@ export const shortDate = (value: string) =>
 export const getProject = (id: string) =>
   projects.find((project) => project.id === id) ?? projects[0];
 export const statusLabels: Record<ChangeStatus, string> = {
-  submitted: "Office review",
-  awaiting_client: "Awaiting approval",
+  submitted: "Submitted",
+  in_review: "In review",
+  authorized_to_proceed: "Work authorized · estimate pending",
+  withdrawn: "Withdrawn",
+  awaiting_gc: "Awaiting approval",
   approved: "Approved",
-  rejected: "Declined",
+  declined: "Declined",
 };

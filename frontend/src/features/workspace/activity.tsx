@@ -7,6 +7,7 @@ import { AppShell, openChange } from "./shell";
 import { Avatar, Button, Card, EmptyState, PageHeading } from "./ui";
 
 const activityByRole: Record<Role, { title: string; description: string }> = {
+  manager: { title: "Manager activity", description: "Follow work authorizations, estimates and GC decisions." },
   contractor: {
     title: "Team activity",
     description: "Track submissions, reviews, and decisions across your projects.",

@@ -229,6 +229,24 @@ class ChangeSubmissionTests(unittest.TestCase):
         self.assertEqual(seen["currency"], "USD")
         self.assertEqual(seen["approved_scope"], "Relocate outlet and test per revised plan")
 
+    def test_review_saves_the_estimators_cents_and_currency(self):
+        change = self.submit().json()
+        review = self.client.post(
+            "/api/v1/changes/" + change["id"] + "/review",
+            json={
+                "scope": "Relocate outlet",
+                "proposed_cost_cents": 1_000_000_01,
+                "requested_timeline_days": 0,
+                "currency": "CAD",
+            },
+        )
+        self.assertEqual(review.status_code, 200, review.text)
+        seen = self.client.get(
+            "/api/v1/approval-session", params={"token": self.gc_token()}
+        ).json()
+        self.assertEqual(seen["proposed_cost_cents"], 100000001)
+        self.assertEqual(seen["currency"], "CAD")
+
     def test_gc_decides_a_reviewed_change_and_cannot_decide_twice(self):
         change = self.submit().json()
         self.client.post(

@@ -70,8 +70,14 @@ def send_to_gc(
     actor_name="Estimator",
     actor_user_id=None,
     gc_user_id=None,
+    *,
+    currency: str = "USD",
+    proposed_cost_cents: int | None = None,
 ) -> dict:
     """Save the estimator's terms and send the change to the GC.
+
+    The cost is proposed_cost_cents (integer cents, preferred) or amount
+    (dollars), the same as the repository's send_to_gc.
 
     Returns {"status": "awaiting_gc", "token": <raw token>}. The token is
     returned once; only its hash is kept. The caller builds the link from it.
@@ -81,13 +87,14 @@ def send_to_gc(
         raise NotFound("Not found")
     if c["status"] not in REVIEWABLE:
         raise Conflict("This change is no longer open for review")
+    cents = _cents(amount) if proposed_cost_cents is None else proposed_cost_cents
     token = issue_client_token(c["id"])
     c.update(
         approved_scope=scope or c["description"],
-        proposed_cost_cents=_cents(amount),
+        proposed_cost_cents=cents,
         requested_timeline_days=impact_days,
-        currency="USD",
-        amount=float(Decimal(str(amount))),
+        currency=currency,
+        amount=float(Decimal(cents) / 100),
         impact_days=impact_days,
         status="awaiting_gc",
         sent_for_approval=True,

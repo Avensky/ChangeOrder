@@ -4,6 +4,8 @@
 
 Run them in this order: `0000`, `0001`, `0002`.
 
+All three were run on the shared Supabase project (PostgreSQL 17) on Nov 13, in that order, and the demo seed (task B7) was applied afterwards. The shared project is on schema v2. The steps below are for any other database, such as a new project or a local PostgreSQL.
+
 | File | What it does |
 | --- | --- |
 | `0000_drop_empty_october_tables.sql` | Drops the three October prototype tables (`change_orders`, `notifications`, `"user"`), and only when all three are there in their October shape and every one is empty. With no `change_orders` table it changes nothing. |
@@ -12,11 +14,13 @@ Run them in this order: `0000`, `0001`, `0002`.
 
 Each file runs in one transaction and records itself in the `schema_migration` table. A file stops with an error, and changes nothing, when the database is not in the state it expects or when it was already applied.
 
-`0002_schema_v2.sql` was edited in place on Nov 13 to add projects, change numbers and titles, history, AI suggestions and notification text. That was allowed only because no file here had been run against any shared database. Once a file has been run, it is never edited again.
+`0002_schema_v2.sql` was edited in place on Nov 13 to add projects, change numbers and titles, history, AI suggestions and notification text. That was allowed only because, at that point, no file here had been run against any shared database. All three files have been run since, so none of them is ever edited again. A change to the schema is a new file with the next number.
 
 ## Before running
 
-A read-only check on Nov 13 found that the Supabase project (PostgreSQL 17) holds only the three October tables, all with 0 rows, and no recorded migrations. So the plan is `0000`, then `0001`, then `0002`. `0000` checks all of that again when it runs.
+On the shared Supabase project these steps are done. A read-only check on Nov 13 found only the three October tables there, all with 0 rows, and no recorded migrations. `0000`, `0001` and `0002` were then run in that order, so the project now matches the "A `company` table" row below and no file here should be run on it again.
+
+For any other database:
 
 1. Confirm what the database holds. This query only reads:
 
@@ -61,7 +65,7 @@ If a file fails, the transaction is rolled back and the database is as it was. F
 
 - Row level security is now on for every table, with no policies. The backend's own database connection still reads and writes everything; Supabase's public REST API with the anon key gets nothing. If the backend suddenly reads zero rows, its `DATABASE_URL` is using a role that does not own the tables.
 - If the notice "revision(s) sent before v2 have no cost or timeline" appeared, the rule `change_order_revision_sent_has_terms` applies to new and edited rows only. Once the old rows are priced or removed, finish it with `ALTER TABLE change_order_revision VALIDATE CONSTRAINT change_order_revision_sent_has_terms;`
-- The app needs rows that no migration creates: a company, its projects (the prototype uses the slugs `north-park`, `harbor` and `cedar`), and one user for each person who submits, reviews, authorizes or approves, including a `gc` user with an email address.
+- The app needs rows that no migration creates: a company, its projects (the prototype uses the slugs `north-park`, `harbor` and `cedar`), and one user for each person who submits, reviews, authorizes or approves, including a `gc` user with an email address. On the shared project the demo seed (task B7), applied after `0002` on Nov 13, created them.
 
 ## Adding a migration
 
@@ -72,15 +76,17 @@ If a file fails, the transaction is rolled back and the database is as it was. F
 
 ## How these files were checked
 
-They have not been run against Supabase. They were run against a throwaway in-memory PostgreSQL (PGlite, PostgreSQL 18; the Supabase project may run a different major version) on:
+Before they were run on Supabase, they were run against a throwaway in-memory PostgreSQL (PGlite, PostgreSQL 18; the Supabase project runs PostgreSQL 17) on:
 
-- the October tables present and empty, which is what Supabase holds: `0000` drops them, `0001` creates the baseline, `0002` gives schema v2
+- the October tables present and empty, which is what Supabase held: `0000` drops them, `0001` creates the baseline, `0002` gives schema v2
 - the October tables with one row in any one of them: `0000` stops and leaves the tables and the row as they were
 - an empty database, and Nov 3 tables with and without rows: `0000` changes nothing
 - October tables next to newer tables, an October table with an unexpected column, one October table missing, and a view that depends on one: `0000` stops each time
 - a second run of each file, `0001` without `0000` on the October tables, `0002` without `0001`, and a failure half way through `0002`
 
 After `0002`, the columns, constraints and indexes were compared with the ones `create_all()` produces from the v2 models, and they match.
+
+The first row of that list is what then happened on the shared project on Nov 13.
 
 ## From the prototype store to schema v2
 
@@ -104,7 +110,7 @@ Every query filters by `company_id`. Start from `db.database.company_select()`.
 | Prototype field | Schema v2 |
 | --- | --- |
 | `id` (UUID text) | `change_event.id` (integer) |
-| `code` (`CO-1049`) | `"CO-"` + `change_event.number`. The number is unique in the company; take the highest plus one in the same transaction as the insert. |
+| `code` (`CO-1049`) | `"CO-"` + `change_event.number`. The number is unique in the company; see "`change_event.number` allocation" below. |
 | `title` | `change_event.title` |
 | `description` | `change_event.description`. The original report; never overwritten. |
 | `severity` | `change_event.severity` |
@@ -122,6 +128,14 @@ Every query filters by `company_id`. Start from `db.database.company_select()`.
 | `original_scope` | `ai_suggestion.original_scope` |
 
 A change has at most one `change_order`. Each review writes a new `change_order_revision` with the next `revision_number`; the latest one holds the current terms.
+
+### `change_event.number` allocation
+
+The repository layer (PR #17) gives a new change the company's highest `number` plus one. Before it reads the highest number, it takes a row lock on the company's row (`SELECT ... FROM company WHERE id = :company_id FOR UPDATE`), in the same transaction as the insert. Two submissions in one company therefore run one after the other: the second waits for the first to commit and then reads the number the first one used. Callers do not need to retry.
+
+The unique key on `(company_id, number)` is the backstop, not part of the normal path. A unique violation on it would mean that some code inserted a change without taking the lock. That is a bug to fix, not a case to retry.
+
+Submissions in different companies do not wait for each other, because each locks only its own company's row.
 
 ### Functions and routes
 
