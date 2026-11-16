@@ -1,6 +1,6 @@
 # Demo script and partner agenda: Wed Nov 18, 2026
 
-Task B6. Owner: Bona. First written Nov 11; updated Nov 15 after Uriel's review of PR #16 and after merging `main`.
+Task B6. Owner: Bona. First written Nov 11; updated Nov 15 after Uriel's review of PR #16 and after merging `main`; updated Nov 16 after the first live phone run on Supabase.
 
 This file has two parts:
 
@@ -17,18 +17,20 @@ Button labels in the script are the ones in `frontend/src` on `main` as of Nov 1
 
 **The one point to land:** a change reported from a phone is saved, priced by the estimator, and decided by the GC from a link, with no GC account.
 
-**Length:** about 12 minutes for the six steps.
+**Length:** about 14 minutes for the six steps (2 + 1.5 + 2 + 3 + 1.5 + 3.5 = 13.5). The agenda gives the demo 12 minutes; if the dry run runs long, shorten step 6 to the manager's authorize and the GC's decision only.
 
 ### Open decisions (pending Bona)
 
 | Decision | Path A | Path B | Default |
 | --- | --- | --- | --- |
 | **Email** (pending Bona) | Real email is configured and a test link reaches the test GC inbox in the dry run: send the real email. | No email provider: the link is copied from the backend console, and we show the email template instead (the wording from `backend/services/email.py`). | **B** until real email is configured and delivered in the dry run |
-| **Sign-in go/no-go, Tue Nov 17 midday** (pending Bona) | All three accounts (field, estimator, manager) pass on the live database **and** in Expo Go: demo with login. | Any account fails: demo the role-picker build on the SQLite store and present sign-in as the next step. | **Decide at midday Tue.** Until then, rehearse both |
+| **Sign-in go/no-go, Tue Nov 17 midday** (pending Bona) | All three accounts (field, estimator, manager) pass on the live database **and** in Expo Go: demo with login. | Any account fails: demo the role-picker build on the SQLite store and present sign-in as the next step. | **Decide at midday Tue.** Mon Nov 16: all three accounts signed in on a phone against Supabase and the full workflow ran, so the default is **A**. Re-confirm Tuesday on the demo network. Keep B as the fallback |
 
 Both paths are written into each step below. In the role-picker build, the role picker in the app is a preview, not authentication, and we say so.
 
-### What is built, and what is still open (as of Nov 15)
+**Path B needs the SQLite store.** With `WORKSPACE_BACKEND=postgres` every staff request needs a sign-in token, so the role picker alone shows "Sign in first". For Path B, leave `WORKSPACE_BACKEND` unset in `backend/.env` and restart the backend.
+
+### What is built, and what is still open (as of Nov 16)
 
 | Piece | State on `main` | Notes for the demo |
 | --- | --- | --- |
@@ -38,14 +40,17 @@ Both paths are written into each step below. In the role-picker build, the role 
 | GC review page and the decision confirmation | Merged | Step 4 |
 | GC link, console fallback | Merged | Copied from the backend console |
 | Email to the GC | Code merged; **provider not configured** (needs `EMAIL_API_KEY`, `EMAIL_API_URL`, `EMAIL_FROM`, `GC_EMAIL`) | Console link unless the dry run proves delivery |
-| Persistence on Supabase (B2, B3, J4) | **Open integration task** | Chosen with `WORKSPACE_BACKEND=postgres`; see the restart checkbox below |
-| Staff sign-in (B7, J5, U6) | **Open integration task** | Role picker today. Sessions are memory-only (PR #24) |
+| Persistence on Supabase (B2, B3, J4) | Merged. Restart check passed on `main` (Jalen, Nov 16) | Chosen with `WORKSPACE_BACKEND=postgres`. Re-run at the dry run; see the restart checkbox below |
+| Staff sign-in, backend (B7, J5) | Merged (#23). Role checks on every staff route | The server needs `SUPABASE_URL` in `backend/.env` |
+| Staff sign-in, app (U6, PR #24) | **Open PR.** All three accounts passed on a phone on Nov 16 with `main` merged in locally | Merge #24 (with `main` merged in) before the dry run. Sessions are memory-only |
+| Field user sees their own submissions (PR #30) | **Open PR** | Without it a signed-in field user's list stays empty in step 1 |
+| GC page crash with the NativeWind color-scheme error (PR #29) | **Open PR** | Without it the GC page fails in step 4 on the web build |
 | In-app alerts, push, SMS | Alerts are stored in the app. **No email-to-field, SMS or phone push exists** | Do not promise any of them |
 
 **Supabase restart result, to fill in at the dry run:**
 
-- [ ] Backend started with `WORKSPACE_BACKEND=postgres`. Result: ____________
-- [ ] A change submitted, backend stopped and restarted, the same change (with its photos) still listed. Result: ____________
+- [ ] Backend started with `WORKSPACE_BACKEND=postgres`. Result: seen working Nov 16 (Jalen, on `main` `42a8f25`, and Bona on a phone). Re-run at the dry run: ____________
+- [ ] A change submitted, backend stopped and restarted, the same change (with its photos) still listed. Result: seen working Nov 16 (Jalen: change, terms and GC link all survived the restart). Re-run at the dry run: ____________
 - [ ] If either box is not ticked by Tue Nov 17 evening, step 2 runs on SQLite and we say "saved on the demo store; the Supabase database is next". We do not say "Supabase".
 
 ### People and devices (proposed, Bona to confirm)
@@ -118,7 +123,7 @@ Sample values: timeline **2 calendar days**, cost $850.00.
 
 1. Backend `.env`: `APP_URL=http://<PC-LAN-IP>:8081` (the frontend's reachable address and port). Add `http://<PC-LAN-IP>:8081` to `CORS_ORIGINS`. Restart the backend, then generate a **new** link: old links keep the old address.
 2. Frontend `.env`: `EXPO_PUBLIC_API_URL=http://<PC-LAN-IP>:8000` (the backend's address and port).
-3. Start the web build: from `frontend/`, `npm run web -- --lan`. See `frontend/GC-REVIEW.md`.
+3. The web build is already served on port 8081 by terminal 2 (`npm run dev:frontend` starts Expo with `--lan`). Do not also run `npm run web`: a second Expo asks for another port. See `frontend/GC-REVIEW.md`.
 4. A link beginning with `localhost` points at the phone itself. Regenerate it with the right `APP_URL`.
 5. **Off the local network this demo needs hosting** (HTTPS frontend and HTTPS API). A LAN address only works for devices on the same network.
 
@@ -179,16 +184,19 @@ Physical-device and network checks stay **pending** (unticked) until someone has
 
 #### Monday Nov 16: setup
 
-- [ ] **Expo and Expo Go versions.** The project is on Expo **SDK 58**, and the iPhone has the **current iOS Expo Go** from the App Store, which supports SDK 58 (PR #25). Confirm after PR #25 is merged; on this branch's `frontend/package.json` the version is still `~57.0.30`. If the app opens with an "incompatible SDK" message, update Expo Go first. Pending. (Uriel)
+- [ ] **Expo and Expo Go versions.** The project is on Expo **SDK 58** (PR #25, merged), and the iPhone has the **current iOS Expo Go** from the App Store, which supports SDK 58. If the app opens with an "incompatible SDK" message, update Expo Go first. Seen working on Bona's phone Nov 16. (Uriel)
+- [ ] **Open PRs merged into `main`, in this order:** #29 (GC page color-scheme crash) and #30 (field user sees own submissions), then #24 (login) with `main` merged into it. Without #29 the GC page fails in step 4; without #30 the field list is empty in step 1. Pending. (Uriel for #29 and #24, Bona for #30; Jalen reviews #30)
+- [ ] **Sign-in settings.** `backend/.env` has `SUPABASE_URL=https://<project>.supabase.co` (public; without it the app says "sign-in is not configured on the server"). `frontend/.env` has `EXPO_PUBLIC_SUPABASE_URL` (the same https address) and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (the publishable key). The database connection string (`DATABASE_URL`) goes only in `backend/.env`: anything named `EXPO_PUBLIC_` is bundled into the app and served to every device. Restart Expo with `--clear` after changing `frontend/.env`. Pending. (Bona, Uriel)
 - [ ] **Backend running.** `npm run dev:backend` starts with no errors and `http://localhost:8000/health` returns `{"status":"ok"}`. Pending. (Jalen)
-- [ ] **Store.** Default `WORKSPACE_BACKEND` (SQLite) works. Then try `WORKSPACE_BACKEND=postgres` with the Supabase settings in the backend `.env`, and record the result in the Supabase restart box above. Pending. (Bona)
+- [ ] **Store.** Path A runs on `WORKSPACE_BACKEND=postgres` with `DATABASE_URL` in `backend/.env`; path B runs with `WORKSPACE_BACKEND` unset (SQLite). Record the result in the Supabase restart box above. Postgres seen working Nov 16 (Jalen, Bona). (Bona)
 - [ ] **Demo network chosen and tested.** Put the PC and phone on it and open `http://<PC IP>:8000/health` in Safari on the phone. Some campus and guest networks block device-to-device traffic; if so, use a phone hotspot both join. Pending. (Uriel)
 - [ ] **PC IP correct everywhere.** From `ipconfig`: `EXPO_PUBLIC_API_URL=http://<IP>:8000` in `frontend/.env` (full reload after changing it), `APP_URL=http://<IP>:8081` and the `CORS_ORIGINS` entry in `backend/.env`. Pending. (Uriel, Jalen)
 - [ ] **Windows Firewall** allows the backend (port 8000) and Metro (port 8081) on this network. VPN off. Pending. (Jalen)
 - [ ] **Expo Go local network permission:** iPhone Settings > Privacy & Security > Local Network > Expo Go. **Check backend** shows "Backend: ok". Pending. (Uriel)
 - [ ] **Anonymous phone-browser check** of the GC link, all six boxes in step 4. Pending. (Jalen, Uriel)
 - [ ] **Email decision (pending Bona).** Either configure the test GC recipient (`GC_EMAIL`) and provider (`EMAIL_API_KEY`, `EMAIL_API_URL`, `EMAIL_FROM`) in the backend `.env` and get a test link delivered (check spam), or agree to the private console fallback. Keys stay in `.env`; never in the repository. Pending. (Bona, Jalen)
-- [ ] **Test accounts** (B7): field, estimator and manager sign in on the live database. Passwords are shared privately. Pending. (Bona)
+- [ ] **Test accounts** (B7): field, estimator and manager sign in on the live database. Passwords are shared privately. Seen working Nov 16 on a phone (all three, full workflow). Re-confirm Tuesday. (Bona)
+- [ ] **Database password changed.** The database password was pasted in chat, a screenshot and a frontend variable during Nov 16 testing. Reset it in the Supabase dashboard (Project Settings, Database), update `backend/.env` for everyone who runs the backend, and share the new value privately. Pending. (Bona)
 - [ ] **Sample photos** on the phone and the demo PC: three for step 1, two for step 6. No real job sites or people. Pending. (Uriel)
 - [ ] **How the audience sees the phone** is decided and tested. Pending. (Bona)
 
@@ -196,10 +204,10 @@ Physical-device and network checks stay **pending** (unticked) until someone has
 
 - [ ] Latest `main` pulled, `npm run install` re-run, backend tests, typecheck and lint pass.
 - [ ] Backend, PC IP, `APP_URL`, CORS and Expo Go permission re-checked on the demo network. The IP can change overnight.
-- [ ] **Demo data cleared or seeded.** The lists show only what the script expects. Clearing touches only the demo company's test records; no drop, truncate or reset on the shared Supabase project.
+- [ ] **Demo data cleared or seeded.** The lists show only what the script expects. On Nov 16 the five test changes were deleted and the database holds only the seed (3 projects, 4 users, the company, no changes). After each dry run, clear what it created with a delete scoped to the demo company's changes (their photos, revisions, approvals, history and notifications), run by Bona. No drop, truncate or reset on the shared Supabase project. Uploaded photo files stay in the storage bucket until removed there.
 - [ ] **Midday sign-in go/no-go (pending Bona).** All three accounts pass on the live database and in Expo Go: Path A. Otherwise Path B. Record the decision here: ____________
 - [ ] **Account re-entry rehearsal** (step 5) done for all three accounts.
-- [ ] Script run start to finish **twice**, timed. Target 12 minutes.
+- [ ] Script run start to finish **twice**, timed. Target 14 minutes; the agenda allows 12, so note which step to shorten.
 - [ ] Each fallback tried once: web preview for step 1, console link for step 4.
 - [ ] Second run screen-recorded. Terminal 1 cropped or hidden in the recording so no link or token shows.
 - [ ] List of everything that broke, with an owner each. Small PR per fix.
@@ -224,7 +232,8 @@ For Bona to paste into an email. Not sent to anyone. Recipients are left out on 
 
 - [ ] Fill in `[TIME]` and `[PLACE OR CALL LINK]`.
 - [ ] After Tuesday's claims check, edit "What we built" and "What we will show". Keep a line only if it was seen working. Lines most at risk: the saved-in-a-database line (Supabase vs SQLite), sign-in, in-app alerts, and the emailed link. If real email is not delivered, change "emailed link" to "a link the GC opens".
-- [ ] Attach or paste the one-page AI cost brief (B4, `docs/ai-cost-brief.md`) and the data summary (B5, `docs/data-status.md`) if they exist.
+- [ ] Attach or paste the one-page AI cost brief (B4, `docs/ai-cost-brief.md`) and the data summary (B5, `docs/data-status.md`). As of Nov 16 neither file is on `main`: they are on branches `b4-ai-cost-brief` and `b5-tad-data-status` and need review and merge first. Do not attach anything Tad's company sent.
+- [ ] Status as of Nov 16 for the claims check: **seen working** are the live database (Jalen's restart check and Bona's phone run) and sign-in for all three accounts on a phone. **Not yet seen** are the emailed link (no provider is configured) and in-app alerts. Re-check all four on Tuesday.
 - [ ] Check the sender line in ask 4 against what the email service really uses.
 - [ ] If Tad has not yet answered who "Zach Smith" is in the Nov 4 notes and how the name is spelled, add it to ask 3.
 - [ ] Remove the DRAFT markers.
