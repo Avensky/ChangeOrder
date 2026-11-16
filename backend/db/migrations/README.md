@@ -178,6 +178,8 @@ ORDER BY d.decided_at, e.id;
 
 The prototype's `revision` is the number of rows, `additional_amount` is the sum of `proposed_cost_cents`, and `additional_days` is the sum of `requested_timeline_days`. The photos of each change come from `photo`. `project.base_budget_cents` holds the contract amount before changes, once someone enters it.
 
+**One currency per project.** Every revision in a project is in `project.currency`, so the sums above never mix currencies, and the work order returns that code as `currency`. The repository keeps this rule; the database has no constraint for it. The first terms saved in a project set `project.currency` (it starts as `USD`). After that, terms in another currency are refused with `CurrencyMismatch`, a `Conflict` (HTTP 409). Two cases are settled earlier or later than "the first terms": a project with a `base_budget_cents` already has its currency, and a project's only unsent draft may still be saved again in a different currency. A change with no terms yet reports its project's currency.
+
 ### What does not map one to one
 
 - **`submitted_by` as `contractor` or `subcontractor`.** Schema v2 has no such label; both are the `field` role. The change points at the user who submitted it.
