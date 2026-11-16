@@ -751,6 +751,21 @@ class RepositoryTests(unittest.TestCase):
             )
         self.assertEqual(change["author"], caller["name"])
 
+    def test_a_signed_in_field_user_sees_their_submission_as_a_subcontractor(self):
+        auth_id = uuid.uuid4()
+        with Session(self.engine) as s:
+            s.add(User(company_id=self.cid, role="field", name="Marcus Rivera", auth_user_id=auth_id))
+            s.commit()
+        caller = repository.caller_for_auth_user(str(auth_id))
+        with repository.atomic(caller["company_id"]):
+            change = repository.create_change(
+                "d", "normal", ["mine.png"], submitted_by_user_id=caller["id"]
+            )
+        self.assertEqual((change["author"], change["submitted_by"]), ("Marcus Rivera", "subcontractor"))
+        with repository.atomic(caller["company_id"]):
+            listed = [c for c in repository.list_changes() if c["id"] == change["id"]]
+        self.assertEqual(listed[0]["submitted_by"], "subcontractor")
+
     def test_caller_for_auth_user_is_none_for_unknown_or_malformed_ids(self):
         self.seed_callers()
         for value in (str(uuid.uuid4()), "not-a-uuid", "", "1", "' OR 1=1 --", None, 42, b"x"):
