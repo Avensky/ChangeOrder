@@ -106,14 +106,14 @@ class RoutesOnRepositoryTests(unittest.TestCase):
             files=[("photos", ("a.png", PNG, "image/png"))],
         )
 
-    def review(self, change_id, cents=12345, days=2):
+    def review(self, change_id, cents=12345, days=2, currency="USD"):
         return self.client.post(
             f"/api/v1/changes/{change_id}/review",
             json={
                 "scope": "Relocate outlet 2 ft",
                 "proposed_cost_cents": cents,
                 "requested_timeline_days": days,
-                "currency": "USD",
+                "currency": currency,
             },
         )
 
@@ -150,18 +150,26 @@ class RoutesOnRepositoryTests(unittest.TestCase):
         self.assertEqual(work_order["revision"], 1)
         self.assertEqual(work_order["additional_days"], 2)
 
-    @unittest.expectedFailure
     def test_estimator_terms_appear_on_the_gc_link(self):
-        # Known gap in db/repository.py _build (B3, Bona's area): the change dict
-        # has no proposed_cost_cents, requested_timeline_days or currency, so the
-        # GC link shows no terms. This passes once _build includes them; then
-        # remove the expectedFailure decorator.
         change = self.submit().json()
         self.review(change["id"], cents=12345, days=2)
         token = self.tokens[0]
         body = self.client.get("/api/v1/approval-session", params={"token": token}).json()
         self.assertEqual(body["proposed_cost_cents"], 12345)
         self.assertEqual(body["requested_timeline_days"], 2)
+        self.assertEqual(body["currency"], "USD")
+
+    def test_review_saves_the_estimators_cents_and_currency(self):
+        # The cents and the currency reach the repository as sent, so a
+        # non-USD estimate is not saved as USD and odd cents are not rounded.
+        change = self.submit().json()
+        review = self.review(change["id"], cents=1_000_000_01, days=0, currency="CAD")
+        self.assertEqual(review.status_code, 200, review.text)
+        body = self.client.get(
+            "/api/v1/approval-session", params={"token": self.tokens[0]}
+        ).json()
+        self.assertEqual(body["proposed_cost_cents"], 100000001)
+        self.assertEqual(body["currency"], "CAD")
 
     def test_fast_track_authorizes_then_the_gc_still_decides(self):
         change = self.submit(severity="high").json()

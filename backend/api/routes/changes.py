@@ -121,23 +121,25 @@ def estimator_review(change_id: str, terms: EstimatorReview = Body(...)):
     with _workflow_errors(), workflow.atomic():
         if workflow.get_change(change_id) is None:
             raise HTTPException(404, "Not found")
+        # Integer cents and the currency go through as given, never as a float.
         sent = workflow.send_to_gc(
             change_id,
             terms.scope,
-            # Money is integer cents on the API and dollars inside the workflow;
-            # Decimal keeps the division exact.
-            Decimal(terms.proposed_cost_cents) / 100,
-            terms.requested_timeline_days,
+            impact_days=terms.requested_timeline_days,
             actor_name="Estimator",
+            currency=terms.currency,
+            proposed_cost_cents=terms.proposed_cost_cents,
         )
         link = _approval_link(sent["token"])
         c = workflow.get_change(change_id)
-        subject, body = email.approval_request(c, link)
-        sent_by_email = email.send(email_settings()["gc_address"], subject, body)
-        # The console link is the fallback and stays printed either way, so the
-        # demo works with no email key and when the provider is down.
-        print("GC LINK:", link, "(emailed)" if sent_by_email else "(not emailed)")
-        return c
+    # Email only after the transaction commits: a link is never sent for a
+    # review that was rolled back, and a slow provider never holds the lock.
+    subject, body = email.approval_request(c, link)
+    sent_by_email = email.send(email_settings()["gc_address"], subject, body)
+    # The console link is the fallback and stays printed either way, so the
+    # demo works with no email key and when the provider is down.
+    print("GC LINK:", link, "(emailed)" if sent_by_email else "(not emailed)")
+    return c
 
 
 @router.post("/changes/{change_id}/authorize", response_model=WorkspaceChangeOut)
@@ -157,11 +159,11 @@ def manager_authorize(change_id: str):
             raise HTTPException(409, "This change is past the point of authorizing work")
         workflow.authorize_to_proceed(change_id, actor_name="Manager")
         c = workflow.get_change(change_id)
-        # A heads-up only. It carries no link, because there is nothing to
-        # decide until the estimator adds the cost.
-        subject, body = email.fast_track_notice(c)
-        email.send(email_settings()["gc_address"], subject, body)
-        return c
+    # A heads-up only, sent after the commit. It carries no link, because there
+    # is nothing to decide until the estimator adds the cost.
+    subject, body = email.fast_track_notice(c)
+    email.send(email_settings()["gc_address"], subject, body)
+    return c
 
 
 @router.get("/approval-session", response_model=WorkspaceChangeOut)
