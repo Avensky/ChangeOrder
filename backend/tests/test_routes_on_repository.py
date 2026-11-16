@@ -39,9 +39,14 @@ class RoutesOnRepositoryTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory()
         cls.upload_dir = Path(cls.temporary.name)
-        from main import app
+        from fastapi import FastAPI
+
         import api.routes.changes as routes
 
+        # A bare app: importing main would mount /uploads from the real folder
+        # and break test_changes.py, which depends on that mount's folder.
+        app = FastAPI()
+        app.include_router(routes.router)
         cls.routes = routes
         cls.app = app
 
@@ -73,8 +78,7 @@ class RoutesOnRepositoryTests(unittest.TestCase):
         # Route uploads and the GC token capture to this test.
         self.patches = [
             patch.object(self.routes, "workflow", repository),
-            patch("services.photos.UPLOAD_DIR", self.upload_dir),
-            patch.object(self.routes, "UPLOAD_DIR", self.upload_dir),
+            patch("core.config.UPLOAD_DIR", self.upload_dir),
         ]
         for p in self.patches:
             p.start()
@@ -170,6 +174,21 @@ class RoutesOnRepositoryTests(unittest.TestCase):
         ).json()
         self.assertEqual(body["proposed_cost_cents"], 100000001)
         self.assertEqual(body["currency"], "CAD")
+
+    def test_a_second_currency_in_a_project_is_refused_with_409(self):
+        # A project holds one currency (B3). The repository's CurrencyMismatch
+        # is a Conflict, so the route answers 409 and carries its message.
+        first = self.submit().json()
+        self.assertEqual(self.review(first["id"], currency="USD").status_code, 200)
+        second = self.submit().json()
+        refused = self.review(second["id"], currency="CAD")
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertIn("USD", refused.json()["detail"])
+        self.assertIn("CAD", refused.json()["detail"])
+        # Nothing was saved or sent for the refused change.
+        self.assertEqual(len(self.tokens), 1)
+        statuses = {c["id"]: c["status"] for c in self.client.get("/api/v1/changes").json()}
+        self.assertEqual(statuses[second["id"]], "submitted")
 
     def test_fast_track_authorizes_then_the_gc_still_decides(self):
         change = self.submit(severity="high").json()

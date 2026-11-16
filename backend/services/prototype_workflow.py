@@ -16,7 +16,12 @@ from services import store
 
 # The same re-exports the repository offers, so routes use one name for both.
 atomic = store.atomic
-create_change = store.create_change
+
+
+def create_change(*args, submitted_by_user_id=None, **kwargs):
+    """The prototype ignores the verified user id; the label stays its submitter."""
+    return store.create_change(*args, **kwargs)
+
 add_event = store.add_event
 notify = store.notify
 change_for_token = store.change_for_token
