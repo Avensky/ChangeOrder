@@ -180,7 +180,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   async function create(input: NewChange) {
     if (!isSubmitterRole(role))
       throw new Error(
-        "Switch to Contractor or Subcontractor to submit a change.",
+        "Only a field user can submit a change.",
       );
     // Connected mode uses the same upload contract as the existing workspace.
     const result =
@@ -239,7 +239,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     days: number,
     scope: string,
   ) {
-    if (role !== "office") throw new Error("Switch to Estimator to review a change.");
+    if (role !== "office") throw new Error("Only an estimator can review a change.");
     const record = changes.find((change) => change.id === id);
     if (!record || !["submitted", "in_review", "authorized_to_proceed"].includes(record.status))
       throw new Error("This change is no longer open for review.");
@@ -258,7 +258,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }
 
   async function authorize(id: string) {
-    if (role !== "manager") throw new Error("Switch to Manager to authorize work.");
+    if (role !== "manager") throw new Error("Only a manager can authorize work.");
     const record = changes.find(change => change.id === id);
     if (!record || record.severity !== "high" || !["submitted", "in_review"].includes(record.status))
       throw new Error("Only an open high-priority change can be authorized.");
@@ -272,7 +272,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   async function decide(id: string, approved: boolean) {
     if (role !== "approver")
-      throw new Error("Switch to Approver to record a decision.");
+      throw new Error("The GC records a decision through the approval link.");
     const record = changes.find((change) => change.id === id);
     if (!record?.sentForApproval || record.status !== "awaiting_gc")
       throw new Error("This request is no longer awaiting a decision.");

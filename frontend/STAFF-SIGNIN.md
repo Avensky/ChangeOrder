@@ -9,3 +9,9 @@ Backend prerequisites: J5 (#23), B7 account links, WORKSPACE_BACKEND=postgres an
 The external /approve link stays public and sends no staff bearer token. Staff cannot switch roles or activate a demo session. Field can report and follow changes; estimator reviews and sends terms; manager authorizes urgent work. Wrong-role direct links to reporting/work-order screens are blocked by the frontend as well as requiring server authorization.
 
 Before merging: test all three accounts on Expo Go against the real backend, verify /me matches their database roles, test expiry/sign-out and a wrong-role 403, and check anonymous GC viewing/approval. Use passwords supplied privately. Browser tests with mock Supabase and API responses do not verify the shared Supabase setup.
+
+## Reproducible browser checks
+
+From frontend, run `npm ci`, `npx playwright install chromium`, then `npm run test:e2e`. The suite builds a static web export and serves it on loopback port 8123. It overrides public settings with synthetic values and intercepts Supabase/API calls; no real account, key, database or password is needed. Run it separately from live device tests.
+
+Legacy internal workspace keys (`subcontractor`, `office`, `approver`) remain behind a mapping from verified field/estimator/manager roles. The authenticated UI never offers a role picker; removing these internal compatibility names is deferred to a separate rename after integration. They do not authorize requests or define extra user roles.
