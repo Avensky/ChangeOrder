@@ -1,3 +1,4 @@
+import { usePathname } from "expo-router";
 import type { ImagePickerAsset } from "expo-image-picker";
 import {
   createContext,
@@ -8,6 +9,7 @@ import {
   useState,
 } from "react";
 
+import { useSession } from "@/features/auth/session";
 import { submitChange } from "@/features/change-orders/api";
 import type { ChangeOrder, Severity } from "@/features/change-orders/types";
 import { API_URL, requestJson } from "@/lib/api";
@@ -21,7 +23,6 @@ import {
   canViewChange,
   isSubmitterRole,
   roles,
-  seedChanges,
   visibleHistory,
 } from "./data";
 
@@ -57,14 +58,19 @@ type Workspace = {
 const WorkspaceContext = createContext<Workspace | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [role, setRole] = useState<Role>("office");
-  const [mode, setMode] = useState<Mode>(API_URL ? "connected" : "demo");
-  const [changes, setChanges] = useState(seedChanges);
+  const { user, signOut } = useSession();
+  const publicPage = usePathname() === "/approve";
+  const role: Role = user?.role === "field" ? "subcontractor" : user?.role === "estimator" ? "office" : "manager";
+  const mode: Mode = "connected";
+  // Kept in the workspace interface while old preview components are removed.
+  const setRole = () => {};
+  const setMode = () => {};
+  const [changes, setChanges] = useState<WorkspaceChange[]>([]);
   const [syncError, setSyncError] = useState("");
   const modeRef = useRef(mode);
   useEffect(() => {
     modeRef.current = mode;
-  }, [mode]);
+  }, [mode, publicPage]);
   const syncSequence = useRef(0);
   function fromServer(c: ChangeOrder): WorkspaceChange {
     const photoUris = c.photo_keys.map(
@@ -81,8 +87,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       amount: c.proposed_cost_cents != null ? c.proposed_cost_cents / 100 : c.amount,
       approvedScope: c.approved_scope,
       impactDays: c.requested_timeline_days ?? c.impact_days,
-      author: roles[c.submitted_by].person,
-      submittedBy: c.submitted_by,
+      author: c.author || "Field",
+      submittedBy: c.submitted_by === "field" ? "subcontractor" : c.submitted_by,
       sentForApproval: c.sent_for_approval,
       createdAt: c.created_at,
       source: "connected",
@@ -116,7 +122,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }
   useEffect(() => {
-    if (mode !== "connected") return;
+    if (mode !== "connected" || publicPage) return;
     const initial = setTimeout(() => {
       void refresh();
     }, 0);
@@ -129,7 +135,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
     // refresh deliberately reads the current mode through modeRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, publicPage]);
   const [readEvents, setReadEvents] = useState<
     Partial<Record<Role, Set<string>>>
   >({});
@@ -174,7 +180,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   async function create(input: NewChange) {
     if (!isSubmitterRole(role))
       throw new Error(
-        "Switch to Contractor or Subcontractor to submit a change.",
+        "Only a field user can submit a change.",
       );
     // Connected mode uses the same upload contract as the existing workspace.
     const result =
@@ -233,7 +239,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     days: number,
     scope: string,
   ) {
-    if (role !== "office") throw new Error("Switch to Estimator to review a change.");
+    if (role !== "office") throw new Error("Only an estimator can review a change.");
     const record = changes.find((change) => change.id === id);
     if (!record || !["submitted", "in_review", "authorized_to_proceed"].includes(record.status))
       throw new Error("This change is no longer open for review.");
@@ -252,7 +258,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }
 
   async function authorize(id: string) {
-    if (role !== "manager") throw new Error("Switch to Manager to authorize work.");
+    if (role !== "manager") throw new Error("Only a manager can authorize work.");
     const record = changes.find(change => change.id === id);
     if (!record || record.severity !== "high" || !["submitted", "in_review"].includes(record.status))
       throw new Error("Only an open high-priority change can be authorized.");
@@ -266,7 +272,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   async function decide(id: string, approved: boolean) {
     if (role !== "approver")
-      throw new Error("Switch to Approver to record a decision.");
+      throw new Error("The GC records a decision through the approval link.");
     const record = changes.find((change) => change.id === id);
     if (!record?.sentForApproval || record.status !== "awaiting_gc")
       throw new Error("This request is no longer awaiting a decision.");
@@ -281,12 +287,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     );
   }
 
-  function reset() {
-    setChanges(seedChanges());
-    setReadEvents({});
-    setMode("demo");
-    setRole("office");
-  }
+  function reset() { signOut(); }
 
   return (
     <WorkspaceContext.Provider
