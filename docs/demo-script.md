@@ -1,6 +1,6 @@
 # Demo script and partner agenda: Wed Nov 18, 2026
 
-Task B6. Owner: Bona. First written Nov 11; updated Nov 15 after Uriel's review of PR #16 and after merging `main`.
+Task B6. Owner: Bona. First written Nov 11; updated Nov 15 after Uriel's review of PR #16 and after merging `main`; updated Nov 16 after the first live phone run on Supabase.
 
 This file has two parts:
 
@@ -17,18 +17,20 @@ Button labels in the script are the ones in `frontend/src` on `main` as of Nov 1
 
 **The one point to land:** a change reported from a phone is saved, priced by the estimator, and decided by the GC from a link, with no GC account.
 
-**Length:** about 12 minutes for the six steps.
+**Length:** about 14 minutes for the six steps (2 + 1.5 + 2 + 3 + 1.5 + 3.5 = 13.5). The agenda gives the demo 12 minutes; if the dry run runs long, shorten step 6 to the manager's authorize and the GC's decision only.
 
 ### Open decisions (pending Bona)
 
-| Decision | Path A | Path B | Default |
+| Decision | If it works | If not | Default |
 | --- | --- | --- | --- |
-| **Email** (pending Bona) | Real email is configured and a test link reaches the test GC inbox in the dry run: send the real email. | No email provider: the link is copied from the backend console, and we show the email template instead (the wording from `backend/services/email.py`). | **B** until real email is configured and delivered in the dry run |
-| **Sign-in go/no-go, Tue Nov 17 midday** (pending Bona) | All three accounts (field, estimator, manager) pass on the live database **and** in Expo Go: demo with login. | Any account fails: demo the role-picker build on the SQLite store and present sign-in as the next step. | **Decide at midday Tue.** Until then, rehearse both |
+| **Email** (Bona is setting it up Nov 17) | Real email is configured and a test link reaches the test GC inbox in the dry run: send the real email. | No delivery: the link is copied from the backend console, and we show the email template instead (the wording from `backend/services/email.py`). | **Console link plus template** until real email is delivered in the dry run |
+| **Sign-in go/no-go, Tue Nov 17 midday** (pending Bona) | All three accounts (field, estimator, manager) pass on the live database **and** in Expo Go: demo with login. | Any account fails: use the **fallback build** (see [If sign-in or Supabase fails](#if-sign-in-or-supabase-fails)), which has no login, and present sign-in as the next step. | **Login.** Mon Nov 16: all three accounts signed in on a phone against Supabase and the full workflow ran. #24 is merged. Re-confirm Tuesday on the demo network |
 
-Both paths are written into each step below. In the role-picker build, the role picker in the app is a preview, not authentication, and we say so.
+The login build is the only build on `main`: the role picker is gone, and the app requires `/api/v1/me` even if the backend runs on SQLite. Setting `WORKSPACE_BACKEND` alone cannot bring the role picker back. The fallback is a separate, pinned build (below).
 
-### What is built, and what is still open (as of Nov 15)
+**Fallback build.** Pin and rehearse a pre-login build: commit `8f3eb0b` (`main` after #30, before #24), checked out in a separate folder, run against the SQLite backend (leave `WORKSPACE_BACKEND` unset in that folder's `backend/.env`). It shows a role picker, which is a preview, not authentication, and we say so. Do not present it as a toggle in the signed-in app. Rehearse it once on Tuesday, or fall back to the recording.
+
+### What is built, and what is still open (as of Nov 16)
 
 | Piece | State on `main` | Notes for the demo |
 | --- | --- | --- |
@@ -38,15 +40,18 @@ Both paths are written into each step below. In the role-picker build, the role 
 | GC review page and the decision confirmation | Merged | Step 4 |
 | GC link, console fallback | Merged | Copied from the backend console |
 | Email to the GC | Code merged; **provider not configured** (needs `EMAIL_API_KEY`, `EMAIL_API_URL`, `EMAIL_FROM`, `GC_EMAIL`) | Console link unless the dry run proves delivery |
-| Persistence on Supabase (B2, B3, J4) | **Open integration task** | Chosen with `WORKSPACE_BACKEND=postgres`; see the restart checkbox below |
-| Staff sign-in (B7, J5, U6) | **Open integration task** | Role picker today. Sessions are memory-only (PR #24) |
+| Persistence on Supabase (B2, B3, J4) | Merged. Restart check passed on `main` (Jalen, Nov 16) | Chosen with `WORKSPACE_BACKEND=postgres`. Re-run at the dry run; see the restart checkbox below |
+| Staff sign-in, backend (B7, J5) | Merged (#23). Role checks on every staff route | The server needs `SUPABASE_URL` in `backend/.env` |
+| Staff sign-in, app (U6, PR #24) | Merged Nov 17. All three accounts passed on a phone on Nov 16 | Re-confirm Tuesday on the demo network. Sessions are memory-only |
+| Field user sees their own submissions (PR #30) | Merged Nov 17 | A signed-in field user sees their own submissions in step 1 |
+| GC page crash with the NativeWind color-scheme error (PR #29) | Merged Nov 16 | The GC page opens on the web build in step 4 |
 | In-app alerts, push, SMS | Alerts are stored in the app. **No email-to-field, SMS or phone push exists** | Do not promise any of them |
 
 **Supabase restart result, to fill in at the dry run:**
 
-- [ ] Backend started with `WORKSPACE_BACKEND=postgres`. Result: ____________
-- [ ] A change submitted, backend stopped and restarted, the same change (with its photos) still listed. Result: ____________
-- [ ] If either box is not ticked by Tue Nov 17 evening, step 2 runs on SQLite and we say "saved on the demo store; the Supabase database is next". We do not say "Supabase".
+- [ ] Backend started with `WORKSPACE_BACKEND=postgres`. Result: seen working Nov 16 (Jalen, on `main` `42a8f25`, and Bona on a phone). Re-run at the dry run: ____________
+- [ ] A change submitted, backend stopped and restarted, the same change (with its photos) still listed. Result: seen working Nov 16 (Jalen: change, terms and GC link all survived the restart). Re-run at the dry run: ____________
+- [ ] If either box is not ticked by Tue Nov 17 evening, step 2 runs on the fallback build with SQLite and we say "saved on the demo store; the Supabase database is next". We do not say "Supabase".
 
 ### People and devices (proposed, Bona to confirm)
 
@@ -66,6 +71,8 @@ Both paths are written into each step below. In the role-picker build, the role 
 | **Phone browser, private tab** | The GC link, opened with no staff session (step 4) |
 | A team inbox that plays the GC | Only if real email is configured. Never use a real GC's address |
 
+**Keep the same demo PC for the whole run.** Photos are saved as files in `backend/uploads/` on the PC that runs the backend, so a photo shows only while that same PC serves it. Do not move the backend to another PC between steps.
+
 Run the backend and Expo in **two terminals**, not `npm run dev`: `npm run dev` stops both when either stops, and step 2 stops only the backend.
 
 ### Step 1: Field reports a change
@@ -75,8 +82,8 @@ Run the backend and Expo in **two terminals**, not `npm run dev`: `npm run dev` 
 | | |
 | --- | --- |
 | **Who acts** | Field (Uriel, on the phone) |
-| **Tap** | **Path A (sign-in):** sign in as the field test account. **Path B (role picker):** pick the field role in the role picker. Start a new change. Take or pick three photos. Enter a title and description. Choose priority Normal. Submit. |
-| **Say** | "A foreman sees something that is not in the contract. They take a few photos, say what it is and how urgent it is, and send it. The photos are for the people reviewing it; the AI does not read them." Path B only: "Sign-in is the next step. This role picker is a preview, not a login." |
+| **Tap** | Sign in as the field test account. Start a new change. Take or pick three photos. Enter a title and description. Choose priority Normal. Submit. |
+| **Say** | "A foreman sees something that is not in the contract. They take a few photos, say what it is and how urgent it is, and send it. The photos are for the people reviewing it; the AI does not read them." |
 | **Audience sees** | Three photo thumbnails on the form, then the new change at the top of the field user's list with status `submitted`. |
 | **Fallback** | **Phone cannot reach the backend:** open `http://<PC IP>:8000/health` in Safari on the phone. If that fails, check the PC IP in `frontend/.env` and the network (README, step 4). If it still fails, do this step in the web preview at `http://localhost:8081` on the demo PC, with sample photos saved on the PC. **Camera fails or is slow:** pick the sample photos from the phone's library. |
 
@@ -92,7 +99,7 @@ Sample text: "Owner asked to move the hose bib from the north wall to the east w
 | **Tap** | In terminal 1 press Ctrl+C. Wait for it to stop. Run `npm run dev:backend` again and wait for "Application startup complete". On the phone, reload the list of changes. |
 | **Say** | If the Supabase box is ticked: "Restart the server and the change is still there, because it is saved in the database." If not: "It is now saved to disk instead of the server's memory, so a restart keeps it. The Supabase database is the next step." |
 | **Audience sees** | The backend stopping and starting. Then the same change, with its photos and status `submitted`, still in the list. |
-| **Fallback** | **Backend does not come back:** read the error in terminal 1, start it once more. **Phone shows an empty list or error:** open the list in the web preview. **Staff must sign in again after a full reload** (Path A): see step 5. **The record is really gone:** say so plainly and move on. Do not work around it. |
+| **Fallback** | **Backend does not come back:** read the error in terminal 1, start it once more. **Phone shows an empty list or error:** open the list in the web preview. **Staff must sign in again after a full reload:** see step 5. **The record is really gone:** say so plainly and move on. Do not work around it. |
 
 Do not save any file under `backend/` during the demo. The backend runs with auto-reload and restarts on every save.
 
@@ -103,7 +110,7 @@ Do not save any file under `backend/` during the demo. The backend runs with aut
 | | |
 | --- | --- |
 | **Who acts** | Estimator (Jalen, browser window A) |
-| **Tap** | **Path A:** signed in as the estimator. **Path B:** pick the estimator role. Open the submitted change. Look at the photos. Enter the proposed cost and the timeline in **calendar days**. Tap **Send estimate to GC**. |
+| **Tap** | Signed in as the estimator. Open the submitted change. Look at the photos. Enter the proposed cost and the timeline in **calendar days**. Tap **Send estimate to GC**. |
 | **Say** | "The estimator checks whether this is in scope, writes up the change, and sets the price and the time. The estimator decides the number. Later the AI will suggest one, but it never approves anything." |
 | **Audience sees** | The estimator's screen with the field photos and description, cost and timeline filled in, then status `awaiting_gc`. After a reload, the field user's copy shows `awaiting_gc`. |
 | **Fallback** | **Web preview fails:** use the estimator role on the phone. **Screen fails entirely:** call the estimator route from `http://localhost:8000/docs`; once role checks (J5) are on, that page needs a sign-in token, so rehearse it or drop it. |
@@ -118,7 +125,7 @@ Sample values: timeline **2 calendar days**, cost $850.00.
 
 1. Backend `.env`: `APP_URL=http://<PC-LAN-IP>:8081` (the frontend's reachable address and port). Add `http://<PC-LAN-IP>:8081` to `CORS_ORIGINS`. Restart the backend, then generate a **new** link: old links keep the old address.
 2. Frontend `.env`: `EXPO_PUBLIC_API_URL=http://<PC-LAN-IP>:8000` (the backend's address and port).
-3. Start the web build: from `frontend/`, `npm run web -- --lan`. See `frontend/GC-REVIEW.md`.
+3. The web build is already served on port 8081 by terminal 2 (`npm run dev:frontend` starts Expo with `--lan`). Do not also run `npm run web`: a second Expo asks for another port. See `frontend/GC-REVIEW.md`.
 4. A link beginning with `localhost` points at the phone itself. Regenerate it with the right `APP_URL`.
 5. **Off the local network this demo needs hosting** (HTTPS frontend and HTTPS API). A LAN address only works for devices on the same network.
 
@@ -151,9 +158,9 @@ Do not tell the audience an email was sent unless the dry run showed one deliver
 | **Tap** | On the phone, reload the list and open the change. In window B, open the manager's list and the same change. |
 | **Say** | "The foreman can see on site that the work is approved. The manager sees it in the office." |
 | **Audience sees** | Status `approved` on the phone and on the manager's screen, and an in-app alert for each. |
-| **Fallback** | **Status does not update:** pull to refresh or switch tab, then open the change again. **Path A, staff are signed out after a full reload:** staff sessions are memory-only (PR #24), so closing Expo Go or reloading the tab signs the person out. Sign in again with the test account. **Do not promise sessions persist.** Have the test accounts ready in a password manager, off the shared screen. **Alerts not shown:** show the status on the change and say alerts are next. |
+| **Fallback** | **Status does not update:** pull to refresh or switch tab, then open the change again. **Staff are signed out after a full reload:** staff sessions are memory-only (PR #24), so closing Expo Go or reloading the tab signs the person out. Sign in again with the test account. **Do not promise sessions persist.** Have the test accounts ready in a password manager, off the shared screen. **Alerts not shown:** show the status on the change and say alerts are next. |
 
-**Rehearse account re-entry** (Tuesday): fully close Expo Go, reopen it, and sign in as each of the three accounts in under 30 seconds. Do the same by reloading each browser window. In Path B, there is nothing to re-enter: re-pick the role.
+**Rehearse account re-entry** (Tuesday): fully close Expo Go, reopen it, and sign in as each of the three accounts in under 30 seconds. Do the same by reloading each browser window.
 
 ### Step 6: Fast track for a high-priority change
 
@@ -169,6 +176,15 @@ Do not tell the audience an email was sent unless the dry run showed one deliver
 
 Sample text: "Supply line is leaking behind the wall in unit 204. Drywall closes tomorrow morning, so the repair has to start today." Sample values: timeline **1 calendar day**, cost $2,400.00.
 
+### If sign-in or Supabase fails
+
+The login build is the only build on `main`, so this is a separate, pinned build, not a setting:
+
+1. On Tuesday, check out commit `8f3eb0b` (`main` after #30 and before #24) in a **separate folder**, run `npm run install` there, and start it against the SQLite backend: leave `WORKSPACE_BACKEND` unset in that folder's `backend/.env`.
+2. It opens with a role picker (field, estimator, manager, GC). Say plainly that the picker is a preview, not a login, and that sign-in is the next step.
+3. Steps 1 to 6 run the same way. Do not say "Supabase" or claim sign-in while it runs.
+4. Rehearse it once on Tuesday. If it cannot be rehearsed, use the recording below instead.
+
 ### If the live demo cannot run at all
 
 Play the screen recording made at Tuesday's second dry run and narrate over it. Say that it is a recording.
@@ -179,16 +195,19 @@ Physical-device and network checks stay **pending** (unticked) until someone has
 
 #### Monday Nov 16: setup
 
-- [ ] **Expo and Expo Go versions.** The project is on Expo **SDK 58**, and the iPhone has the **current iOS Expo Go** from the App Store, which supports SDK 58 (PR #25). Confirm after PR #25 is merged; on this branch's `frontend/package.json` the version is still `~57.0.30`. If the app opens with an "incompatible SDK" message, update Expo Go first. Pending. (Uriel)
+- [ ] **Expo and Expo Go versions.** The project is on Expo **SDK 58** (PR #25, merged), and the iPhone has the **current iOS Expo Go** from the App Store, which supports SDK 58. If the app opens with an "incompatible SDK" message, update Expo Go first. Seen working on Bona's phone Nov 16. (Uriel)
+- [x] **Open PRs merged into `main`:** #29 (GC page color-scheme crash), #30 (field user sees own submissions) and #24 (login) were merged Nov 16-17 (Bona). Everyone pulls the latest `main` and runs `npm run install` before the dry run. Done Nov 17.
+- [ ] **Sign-in settings.** `backend/.env` has `SUPABASE_URL=https://<project>.supabase.co` (public; without it the app says "sign-in is not configured on the server"). `frontend/.env` has `EXPO_PUBLIC_SUPABASE_URL` (the same https address) and `EXPO_PUBLIC_SUPABASE_ANON_KEY` (the publishable key). The database connection string (`DATABASE_URL`) goes only in `backend/.env`: anything named `EXPO_PUBLIC_` is bundled into the app and served to every device. Restart Expo with `--clear` after changing `frontend/.env`. Pending. (Bona, Uriel)
 - [ ] **Backend running.** `npm run dev:backend` starts with no errors and `http://localhost:8000/health` returns `{"status":"ok"}`. Pending. (Jalen)
-- [ ] **Store.** Default `WORKSPACE_BACKEND` (SQLite) works. Then try `WORKSPACE_BACKEND=postgres` with the Supabase settings in the backend `.env`, and record the result in the Supabase restart box above. Pending. (Bona)
+- [ ] **Store.** The demo runs on `WORKSPACE_BACKEND=postgres` with `DATABASE_URL` in `backend/.env`. The fallback build runs on SQLite. Record the result in the Supabase restart box above. Postgres seen working Nov 16 (Jalen, Bona). (Bona)
 - [ ] **Demo network chosen and tested.** Put the PC and phone on it and open `http://<PC IP>:8000/health` in Safari on the phone. Some campus and guest networks block device-to-device traffic; if so, use a phone hotspot both join. Pending. (Uriel)
 - [ ] **PC IP correct everywhere.** From `ipconfig`: `EXPO_PUBLIC_API_URL=http://<IP>:8000` in `frontend/.env` (full reload after changing it), `APP_URL=http://<IP>:8081` and the `CORS_ORIGINS` entry in `backend/.env`. Pending. (Uriel, Jalen)
 - [ ] **Windows Firewall** allows the backend (port 8000) and Metro (port 8081) on this network. VPN off. Pending. (Jalen)
-- [ ] **Expo Go local network permission:** iPhone Settings > Privacy & Security > Local Network > Expo Go. **Check backend** shows "Backend: ok". Pending. (Uriel)
+- [ ] **Expo Go local network permission:** iPhone Settings > Privacy & Security > Local Network > Expo Go. **Check backend** (Settings, then "Your account") shows "Backend: ok". Pending. (Uriel)
 - [ ] **Anonymous phone-browser check** of the GC link, all six boxes in step 4. Pending. (Jalen, Uriel)
-- [ ] **Email decision (pending Bona).** Either configure the test GC recipient (`GC_EMAIL`) and provider (`EMAIL_API_KEY`, `EMAIL_API_URL`, `EMAIL_FROM`) in the backend `.env` and get a test link delivered (check spam), or agree to the private console fallback. Keys stay in `.env`; never in the repository. Pending. (Bona, Jalen)
-- [ ] **Test accounts** (B7): field, estimator and manager sign in on the live database. Passwords are shared privately. Pending. (Bona)
+- [ ] **Email.** Bona is setting up delivery on Nov 17 (Resend, with the test GC recipient). Only `EMAIL_API_KEY` and `GC_EMAIL` are required; `EMAIL_API_URL` and `EMAIL_FROM` have defaults. The free test sender normally delivers only to the Resend account owner, so `GC_EMAIL` is that address. Get a test link delivered in the dry run (check spam); the backend console prints "(emailed)" or "(not emailed)". Until it is delivered, the plan is the console link plus the email template. Keys stay in `.env`; never in the repository. Pending. (Bona, Jalen)
+- [ ] **Test accounts** (B7): field, estimator and manager sign in on the live database. Passwords are shared privately. Seen working Nov 16 on a phone (all three, full workflow). Re-confirm Tuesday. (Bona)
+- [x] **Database password changed.** Bona reports the database password was reset on Nov 16-17 and the new value was sent privately to Jalen, the only other person who runs the backend. Uriel and everyone else need only the public Supabase URL and key, never the database string. Done.
 - [ ] **Sample photos** on the phone and the demo PC: three for step 1, two for step 6. No real job sites or people. Pending. (Uriel)
 - [ ] **How the audience sees the phone** is decided and tested. Pending. (Bona)
 
@@ -196,10 +215,10 @@ Physical-device and network checks stay **pending** (unticked) until someone has
 
 - [ ] Latest `main` pulled, `npm run install` re-run, backend tests, typecheck and lint pass.
 - [ ] Backend, PC IP, `APP_URL`, CORS and Expo Go permission re-checked on the demo network. The IP can change overnight.
-- [ ] **Demo data cleared or seeded.** The lists show only what the script expects. Clearing touches only the demo company's test records; no drop, truncate or reset on the shared Supabase project.
-- [ ] **Midday sign-in go/no-go (pending Bona).** All three accounts pass on the live database and in Expo Go: Path A. Otherwise Path B. Record the decision here: ____________
+- [ ] **Demo data cleared or seeded.** The lists show only what the script expects. On Nov 16 the five test changes were deleted and the database holds only the seed (3 projects, 4 users, the company, no changes). After each dry run, clear what it created with a delete scoped to the demo company's changes (their photos, revisions, approvals, history and notifications), run by Bona. No drop, truncate or reset on the shared Supabase project. Uploaded photos are files in `backend/uploads/` on the PC that runs the backend (not a storage bucket); delete them there too.
+- [ ] **Midday sign-in go/no-go (pending Bona).** All three accounts pass on the live database and in Expo Go: demo with login. Otherwise the fallback build. Record the decision here: ____________
 - [ ] **Account re-entry rehearsal** (step 5) done for all three accounts.
-- [ ] Script run start to finish **twice**, timed. Target 12 minutes.
+- [ ] Script run start to finish **twice**, timed. Target 14 minutes; the agenda allows 12, so note which step to shorten.
 - [ ] Each fallback tried once: web preview for step 1, console link for step 4.
 - [ ] Second run screen-recorded. Terminal 1 cropped or hidden in the recording so no link or token shows.
 - [ ] List of everything that broke, with an owner each. Small PR per fix.
@@ -210,7 +229,7 @@ Physical-device and network checks stay **pending** (unticked) until someone has
 
 - [ ] PC and phone on the demo network. `ipconfig` checked against `frontend/.env` and `backend/.env`.
 - [ ] Two terminals: `npm run dev:backend`, then `npm run dev:frontend`; web build running for the GC page. App opened in Expo Go from the current QR code. "Backend: ok".
-- [ ] Accounts ready (Path A) or role picker ready (Path B). Demo data as left on Tuesday.
+- [ ] Accounts ready, signed in fresh shortly before the demo (a sign-in lasts about an hour). Demo data as left on Tuesday.
 - [ ] Phone charged, Do Not Disturb on, auto-lock off. Notifications off on the PC.
 - [ ] Terminal 1 off the shared screen. Recording file opens.
 
@@ -224,7 +243,8 @@ For Bona to paste into an email. Not sent to anyone. Recipients are left out on 
 
 - [ ] Fill in `[TIME]` and `[PLACE OR CALL LINK]`.
 - [ ] After Tuesday's claims check, edit "What we built" and "What we will show". Keep a line only if it was seen working. Lines most at risk: the saved-in-a-database line (Supabase vs SQLite), sign-in, in-app alerts, and the emailed link. If real email is not delivered, change "emailed link" to "a link the GC opens".
-- [ ] Attach or paste the one-page AI cost brief (B4, `docs/ai-cost-brief.md`) and the data summary (B5, `docs/data-status.md`) if they exist.
+- [ ] Attach or paste the one-page AI cost brief (B4, `docs/ai-cost-brief.md`) and the data summary (B5, `docs/data-status.md`). As of Nov 16 neither file is on `main`: they are on branches `b4-ai-cost-brief` and `b5-tad-data-status` and need review and merge first. Do not attach anything Tad's company sent.
+- [ ] Status as of Nov 16 for the claims check: **seen working** are the live database (Jalen's restart check and Bona's phone run) and sign-in for all three accounts on a phone. **Not yet seen** are the emailed link (no provider is configured) and in-app alerts. Re-check all four on Tuesday.
 - [ ] Check the sender line in ask 4 against what the email service really uses.
 - [ ] If Tad has not yet answered who "Zach Smith" is in the Nov 4 notes and how the name is spelled, add it to ask 3.
 - [ ] Remove the DRAFT markers.
