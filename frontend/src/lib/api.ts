@@ -22,6 +22,11 @@ function webApiUrl() {
 }
 export const API_URL = webApiUrl();
 
+let accessToken: string | null = null;
+let unauthorizedHandler: (() => void) | null = null;
+export function setAccessToken(value: string | null) { accessToken = value; }
+export function setUnauthorizedHandler(value: (() => void) | null) { unauthorizedHandler = value; }
+
 export async function requestJson<T>(
   path: string,
   options: RequestInit = {},
@@ -35,8 +40,16 @@ export async function requestJson<T>(
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(API_URL + path, { ...options, signal: controller.signal });
+    const headers = new Headers(options.headers);
+    const token = accessToken;
+    const publicRequest = path.startsWith('/api/v1/approval-session') || path === '/health';
+    if (token && !publicRequest && !headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
+    const response = await fetch(API_URL + path, { ...options, headers, signal: controller.signal });
     if (!response.ok) {
+      if (response.status === 401 && token && token === accessToken && !publicRequest) {
+        setAccessToken(null);
+        unauthorizedHandler?.();
+      }
       const body = await response.json().catch(() => null);
       const detail = body?.detail;
       const message = typeof detail === 'string'

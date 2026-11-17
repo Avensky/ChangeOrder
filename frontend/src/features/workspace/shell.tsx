@@ -3,7 +3,6 @@ import {
   Activity,
   Bell,
   Building2,
-  Check,
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
@@ -12,12 +11,10 @@ import {
   Plus,
   Search,
   Settings2,
-  X,
   type LucideIcon,
 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import {
-  Modal,
   Pressable,
   ScrollView,
   Text,
@@ -26,9 +23,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useSession } from "@/features/auth/session";
 import { useWorkspace } from "./context";
 import { roles, type Role } from "./data";
-import { Avatar, Card } from "./ui";
+import { Avatar } from "./ui";
 
 export const go = (path: string) => router.push(path as Href);
 export const openChange = (id: string) =>
@@ -118,11 +116,11 @@ export function AppShell({
 }) {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
-  const { role, setRole, mode, unread, changes, syncError, refresh } =
+  const { role, mode, unread, changes, syncError, refresh } =
     useWorkspace();
-  const [showRolePicker, setShowRolePicker] = useState(false);
   const [search, setSearch] = useState("");
-  const profile = roles[role];
+  const { user } = useSession();
+  const profile = { ...roles[role], person: user?.name ?? roles[role].person };
   const { links, action } = roleNavigation[role];
   const pending = changes.filter(({ status }) => {
     if (role === "office") return ["submitted", "in_review", "authorized_to_proceed"].includes(status);
@@ -217,8 +215,8 @@ export function AppShell({
           <View className="border-t border-[#345044] pt-4">
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Switch workspace preview"
-              onPress={() => setShowRolePicker(true)}
+              accessibilityLabel="Account settings"
+              onPress={() => go("/settings")}
               className="min-h-[44px] flex-row items-center gap-3 rounded-xl px-2 hover:bg-[#203E31]"
             >
               <Avatar name={profile.person} />
@@ -280,13 +278,12 @@ export function AppShell({
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Preview role"
-              accessibilityState={{ expanded: showRolePicker }}
-              onPress={() => setShowRolePicker(true)}
+              accessibilityLabel="Signed-in account"
+              onPress={() => go("/settings")}
               className="min-h-[44px] flex-row items-center gap-2 rounded-lg bg-canvas px-2.5"
             >
               <Text className="text-[10px] font-semibold text-ink">
-                {profile.label} preview
+                {profile.label}
               </Text>
               <ChevronDown size={12} color="#74827C" />
             </Pressable>
@@ -387,74 +384,7 @@ export function AppShell({
         </View>
       </View>
 
-      <Modal
-        visible={showRolePicker}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowRolePicker(false)}
-      >
-        <View className="flex-1 items-center justify-center px-5 py-5">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close dialog"
-            className="absolute inset-0 bg-black/35"
-            onPress={() => setShowRolePicker(false)}
-          />
-          <Card className="max-h-full w-full max-w-[420px] overflow-hidden">
-            <ScrollView contentContainerClassName="p-5 sm:p-6">
-              <View className="mb-2 flex-row items-center justify-between">
-                <Text
-                  accessibilityRole="header"
-                  className="text-[20px] font-bold text-ink"
-                >
-                  Preview a workspace
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Close"
-                  onPress={() => setShowRolePicker(false)}
-                  className="h-11 w-11 items-center justify-center rounded-lg hover:bg-canvas"
-                >
-                  <X size={18} color="#74827C" />
-                </Pressable>
-              </View>
-              <Text className="mb-4 text-[12px] leading-5 text-muted">
-                Roles here apply to this preview session.
-              </Text>
-              <View className="gap-2">
-                {(Object.keys(roles) as Role[]).map((key) => (
-                  <Pressable
-                    key={key}
-                    accessibilityRole="button"
-                    accessibilityLabel={"Preview as " + roles[key].label}
-                    accessibilityState={{ selected: role === key }}
-                    onPress={() => {
-                      setRole(key);
-                      setShowRolePicker(false);
-                    }}
-                    className={`flex-row items-center gap-3 rounded-xl border p-3 ${role === key ? "border-forest bg-mint" : "border-line bg-white"}`}
-                  >
-                    <Avatar name={roles[key].person} size={36} />
-                    <View className="flex-1">
-                      <Text className="text-[12px] font-semibold text-ink">
-                        {roles[key].label}
-                      </Text>
-                      <Text className="mt-1 text-[10px] text-muted">
-                        {roles[key].caption}
-                      </Text>
-                    </View>
-                    {role === key ? (
-                      <Check size={16} color="#23664D" />
-                    ) : (
-                      <ChevronRight size={15} color="#74827C" />
-                    )}
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
-          </Card>
-        </View>
-      </Modal>
+
     </View>
   );
 }
