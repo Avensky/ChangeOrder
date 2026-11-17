@@ -5,7 +5,8 @@ import uuid
 
 from fastapi import HTTPException, UploadFile
 
-from core.config import MAX_PHOTO_BYTES, UPLOAD_DIR
+import core.config as config
+from core.config import MAX_PHOTO_BYTES
 
 EXTENSIONS = {
     "image/jpeg": ".jpg",
@@ -57,7 +58,7 @@ async def save_photo(photo: UploadFile) -> str:
         key = uuid.uuid4().hex + extension
         # Disk writes can block. Run this one in a thread so the async server
         # can keep accepting other requests while the image is written.
-        await asyncio.to_thread((UPLOAD_DIR / key).write_bytes, data)
+        await asyncio.to_thread((config.UPLOAD_DIR / key).write_bytes, data)
         return key
     finally:
         # Close the uploaded temporary file on both success and validation errors.
