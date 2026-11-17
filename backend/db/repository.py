@@ -79,6 +79,19 @@ _ROLE_LABEL = {
 }
 _SUBMITTER_LABELS = ("contractor", "subcontractor")
 
+
+def _submitter_label(user) -> str:
+    """The prototype's label for who submitted a change.
+
+    A user named like a label keeps it. Any other field user is a
+    "subcontractor", because that is what the app's field screens filter on;
+    answering "contractor" hid a signed-in field user's own submissions.
+    """
+    label = user.name.lower()
+    if label in _SUBMITTER_LABELS:
+        return label
+    return "subcontractor" if user.role == "field" else "contractor"
+
 DEFAULT_FIRST_NUMBER = 1049  # the prototype's first code, CO-1049
 DEFAULT_LINK_DAYS = 14
 # Three uppercase letters, the same rule as schemas.changes.Currency.
@@ -400,7 +413,7 @@ def _build(events: list[ChangeEvent]) -> list[dict]:
             status=_legacy(event.status),
             photo_keys=photos.get(event.id, []),
             project_id=projects[event.project_id].slug,
-            submitted_by=label if label in _SUBMITTER_LABELS else "contractor",
+            submitted_by=_submitter_label(submitter),
             author=submitter.name,
             created_at=_iso(event.created_at),
             amount=_dollars(revision.proposed_cost_cents) if revision else 0,
