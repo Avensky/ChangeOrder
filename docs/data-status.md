@@ -10,6 +10,7 @@ Task B5. Tracks the data requested from Tad (Zack Smith Plumbing) on Nov 5, 2026
 - After the meeting: Bona emailed Tad a detailed outline of the request.
 - Tad's estimator was out when they met, so timing is unknown.
 - Wed Nov 18 (morning): Bona received five original project proposals and the five change orders for those projects from Tad. That is the minimum tier (rows 1 and 2). The files are kept outside this repository.
+- Tad is also preparing the matching invoices for the five change orders, expected from his accounting department within a couple of days of Nov 18. Bona asked for the final billed amount, the invoice date with a paid or approved marker, a labor and materials breakdown if available, a project and change order label on each invoice, and the same redaction as the first set. Row 1 stays `received` and gains the invoices when they arrive.
 - The Nov 13 follow-up is no longer needed for rows 1 and 2. The draft below is kept for reference only; edit it before any further request for the full tier (rows 3 to 8).
 
 **Bona updates the status column.** Rows 1 and 2 are `received` on Bona's word (Nov 18). Rows 3 to 8 stay "Bona to confirm": this page was written without access to Bona's email or to anything Tad has sent, so nothing here says whether those items have or have not arrived.
