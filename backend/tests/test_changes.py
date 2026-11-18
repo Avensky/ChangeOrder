@@ -398,6 +398,8 @@ class ChangeSubmissionTests(unittest.TestCase):
         # Opening the link must not be presented as a decision.
         self.assertIn("does not approve anything", body)
         self.assertEqual(sent["headers"].get("Authorization"), "Bearer test-key")
+        # A named agent: the provider's CDN refuses urllib's default one.
+        self.assertEqual(sent["headers"].get("User-agent"), "ChangeOrder/1.0")
 
     def test_console_link_still_works_when_no_email_key_is_set(self):
         change = self.submit().json()

@@ -44,6 +44,10 @@ def send(to: str, subject: str, body: str) -> bool:
             headers={
                 "Authorization": f"Bearer {settings['api_key']}",
                 "Content-Type": "application/json",
+                # Resend sits behind Cloudflare, which rejects urllib's default
+                # "Python-urllib" agent with 403 (error 1010) before the request
+                # reaches the account, so a send fails and leaves no log there.
+                "User-Agent": "ChangeOrder/1.0",
             },
             method="POST",
         )
