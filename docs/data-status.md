@@ -9,9 +9,10 @@ Task B5. Tracks the data requested from Tad (Zack Smith Plumbing) on Nov 5, 2026
 - Nov 5: Bona met Tad. An NDA is signed.
 - After the meeting: Bona emailed Tad a detailed outline of the request.
 - Tad's estimator was out when they met, so timing is unknown.
-- Fri Nov 13: if nothing has arrived, Bona sends the follow-up below.
+- Wed Nov 18 (morning): Bona received five original project proposals and the five change orders for those projects from Tad. That is the minimum tier (rows 1 and 2). The files are kept outside this repository.
+- The Nov 13 follow-up is no longer needed for rows 1 and 2. The draft below is kept for reference only; edit it before any further request for the full tier (rows 3 to 8).
 
-**Bona updates the status column.** Every status below is "Bona to confirm" because this page was written without access to Bona's email or to anything Tad has sent. Nothing here says an item has or has not arrived.
+**Bona updates the status column.** Rows 1 and 2 are `received` on Bona's word (Nov 18). Rows 3 to 8 stay "Bona to confirm": this page was written without access to Bona's email or to anything Tad has sent, so nothing here says whether those items have or have not arrived.
 
 ## Checklist of the Nov 5 request
 
@@ -19,8 +20,8 @@ Status values for Bona to use: `received`, `partial` (say what is missing), `not
 
 | # | Item | Why we need it | Tier | Concern Tad raised | Status |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Completed change order examples, each with the original request, final proposal, revisions, approval, final amounts and dates | The core examples the AI learns from: what was reported, how it was priced, and what was finally approved | Minimum (a handful); full (many more) | None recorded in the spec | Bona to confirm |
-| 2 | Original project proposals | The scope baseline. Tad's rule: anything absent from the original proposal is flagged as a likely change order | Minimum (the proposals behind the change orders in row 1); full (many more) | None recorded in the spec | Bona to confirm |
+| 1 | Completed change order examples, each with the original request, final proposal, revisions, approval, final amounts and dates | The core examples the AI learns from: what was reported, how it was priced, and what was finally approved | Minimum (a handful); full (many more) | None recorded in the spec | `received` (Nov 18: five proposals and the five change orders for them) |
+| 2 | Original project proposals | The scope baseline. Tad's rule: anything absent from the original proposal is flagged as a likely change order | Minimum (the proposals behind the change orders in row 1); full (many more) | None recorded in the spec | `received` (Nov 18: five proposals and the five change orders for them) |
 | 3 | Labor hours and rates by trade | Cost breakdown, so a suggested cost can be built from hours and rates instead of a single total | Full | See row 8: rates may only be shareable as a redacted breakout | Bona to confirm |
 | 4 | Materials and quantities | Cost breakdown for the materials part of an estimate | Full | None recorded in the spec | Bona to confirm |
 | 5 | Equipment, subcontractor quotes, permits, overhead, markup, tax | The rest of the cost breakdown, so a suggestion covers the whole price and not only labor and materials | Full | None recorded in the spec | Bona to confirm |
@@ -42,7 +43,7 @@ The AI stays advisory in both tiers. It suggests scope and cost, and the estimat
 
 ## Follow-up email to Tad
 
-> **DRAFT. Not sent.** Only Bona sends this, and only if nothing has arrived by Fri Nov 13. No agent sends it. Bona, edit it to match the outline you actually sent before sending.
+> **DRAFT. Not sent. Superseded for rows 1 and 2: they arrived Nov 18.** Only Bona sends anything to Tad, and only for items still missing. No agent sends it. Bona, edit it to match the outline you actually sent before sending.
 
 **To:** Tad
 **Subject:** Checking in on the change order examples
