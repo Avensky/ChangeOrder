@@ -211,6 +211,16 @@ class AuthAndRoleTests(unittest.TestCase):
             response = self.client.get("/api/v1/changes", headers=self.auth_header("estimator", **kwargs))
             self.assertEqual(response.status_code, 401, kwargs)
 
+    def test_a_small_clock_skew_is_tolerated_but_a_large_one_is_not(self):
+        now = int(time.time())
+        # Supabase's clock a few seconds ahead of this server: the token has just been issued.
+        ok = self.client.get("/api/v1/changes", headers=self.auth_header("estimator", extra={"iat": now + 5}))
+        self.assertEqual(ok.status_code, 200)
+        # Far ahead, or long expired, is still refused.
+        for kwargs in ({"extra": {"iat": now + 300}}, {"exp": -300}):
+            response = self.client.get("/api/v1/changes", headers=self.auth_header("estimator", **kwargs))
+            self.assertEqual(response.status_code, 401, kwargs)
+
     def test_a_token_signed_by_another_key_is_401(self):
         other = ec.generate_private_key(ec.SECP256R1())
         response = self.client.get("/api/v1/changes", headers=self.auth_header("estimator", key=other))
