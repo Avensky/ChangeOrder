@@ -1,6 +1,6 @@
 # Week 2 tasks (Nov 23 to Dec 1, 2026)
 
-Goal: reach the spec's Phase 2 gate. The estimator sees an AI scope-and-cost suggestion on sample change orders from Tad's data and rates it. In the same stretch, move the demo from "works on the club's Wi-Fi" toward something a partner can open from anywhere: hosted over HTTPS, photos kept private, and a GC link whose token does not stay in the address bar.
+Goal: reach the spec's Phase 2 gate. The estimator sees an AI scope-and-cost suggestion on sample change orders from Tad's data and rates it. In the same stretch, move the demo from "works on the club's Wi-Fi" toward something a partner can open from anywhere: ready to host over HTTPS, photos kept private, and a GC link whose token does not stay in the address bar.
 
 Con's framing from the Nov 19 meeting: the semester goal is to show the change order flow works end to end and that the AI gives believable estimates. It is not a finished product. The AI work comes first; hosting, private photos and the GC token are real hardening and follow it.
 
@@ -17,12 +17,14 @@ Dates are the plan's. **Wed Nov 25** is the last working day before Thanksgiving
 
 If a dependency is not merged yet, code against the contract or a stub and say so in the PR.
 
+**Hosting is on hold (decided Nov 23).** Bona will not create the Render account until the next meeting with Con, to ask the partners to pay for it. The decision is made and merged (`docs/hosting.md`), but J11, U11 and A2 cannot finish this week. Until then the demo runs from the local network, and the Supabase database stays live on its Free plan, which Bona keeps active and checks before any demo. Everything else in this plan is unaffected.
+
 Order of the main chains:
 
 - AI: B8 (data and AWS), then B9 (suggestion worker), then J7 (suggestion routes) and U7 (suggestion panel), then B10 (evaluation).
 - GC link: J8 (token exchange), then U8 (GC page).
 - Photos: B11 (decision), then J9 (private storage), then U9 (show photos).
-- Hosting: B12 (decision), then J11 (API) and U11 (web build), then A2.
+- Hosting (on hold until after the meeting with Con): B12 (decision, done), then J11 (API) and U11 (web build), then A2.
 
 ## Rules for this week
 
@@ -66,6 +68,7 @@ Order of the main chains:
 - **Done when:** The decision and its reason are in `docs/photo-storage.md`, the bucket exists and is private, and any migration is merged.
 - **May edit:** `docs/photo-storage.md` (new), `backend/db/` if a migration is needed.
 - **Spec:** Data model and storage; API and security (private evidence).
+- **Status (Nov 23):** the decision is merged (`docs/photo-storage.md`). Creating the private bucket and sharing the secret key with Jalen are Bona's manual steps and are still to do.
 
 ## B12 Hosting decision
 
@@ -74,6 +77,7 @@ Order of the main chains:
 - **Done when:** `docs/hosting.md` names the providers, the cost, the secret settings each needs, and who holds the accounts. No keys appear in it.
 - **May edit:** `docs/hosting.md` (new).
 - **Spec:** Notifications and GC approval (reachable HTTPS); API and security.
+- **Status (Nov 23):** the decision is merged (`docs/hosting.md`: Render for the API, Cloudflare Pages for the web build). Creating the accounts and paying is on hold until the next meeting with Con. The Supabase Free plan can pause an idle project, so Bona keeps it active and checks it before any demo.
 
 ## B13 Tad follow-up and next semester
 
@@ -127,11 +131,12 @@ Order of the main chains:
 
 ## J11 Host the API
 
-- **Owner:** Jalen. **Due:** Tue Dec 1. **Depends on:** B12.
+- **Owner:** Jalen. **Due:** after the Render account exists (on hold until after the meeting with Con; was Tue Dec 1). **Depends on:** B12 and the account.
 - **Task:** Deploy the API to the host chosen in B12 with its secrets in the host's secret settings. Set `APP_URL` and CORS for the hosted web build, and add a health check.
 - **Done when:** The hosted API answers `/health`, signs in the three test accounts, and the GC link opens over HTTPS from a phone off the club's Wi-Fi.
 - **May edit:** `backend/` configuration and deploy files, `backend/core/config.py`, `docs/hosting.md`.
 - **Spec:** Notifications and GC approval; API and security.
+- **Until the account exists:** prepare what needs no account: the start command, the settings list from `docs/hosting.md`, and, if you want one, a small separate keep-alive that touches the database now and then so an idle Free project does not pause (keep `/health` itself independent of the database). Do not deploy.
 
 ---
 
@@ -169,11 +174,12 @@ Order of the main chains:
 
 ## U11 Host the web build
 
-- **Owner:** Uriel. **Due:** Tue Dec 1. **Depends on:** B12.
+- **Owner:** Uriel. **Due:** after J11 is live (on hold until after the meeting with Con; was Tue Dec 1). **Depends on:** B12 and J11.
 - **Task:** Publish the web build, including the GC page, to the host chosen in B12 with the public API address and Supabase public settings. Only public settings go in the build.
 - **Done when:** The web build loads over HTTPS from a phone off the club's Wi-Fi and signs in against the hosted API.
 - **May edit:** `frontend/`, `docs/hosting.md`.
 - **Spec:** Notifications and GC approval.
+- **Until the API is hosted:** the web build needs the hosted API's address, so do not deploy. You can still check the export builds (`npx expo export --platform web`), and that `/approve?token=...` resolves to the right page in the static export, so the first deploy has no surprises.
 
 ## U12 Run the browser tests in CI
 
@@ -195,6 +201,6 @@ Order of the main chains:
 
 ## A2 Hosted integration check
 
-- **Owner:** all three. **Due:** Tue Dec 1. **Depends on:** J8, J9, J11, U8, U9, U11.
+- **Owner:** all three. **Due:** after hosting is live (was Tue Dec 1). Until then run the same check on the local network. **Depends on:** J8, J9, U8, U9, and J11 and U11 for the hosted run.
 - **Task:** On a phone off the club's Wi-Fi, run the demo against the hosted app: field submits with photos, the estimator requests and rates an AI suggestion, the GC decides from the emailed link, and the three roles see the result. List what breaks.
 - **Done when:** The flow runs start to finish on the hosted app, photos load from private storage, and the GC link token is not left in the address. Open a small PR per fix, owned by the area's owner.
