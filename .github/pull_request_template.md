@@ -9,7 +9,7 @@ Owner: <!-- Bona, Jalen, or Uriel -->
 
 ## Done when
 
-<!-- Paste the "done when" line from tasks/week-1.md and say how you checked it. -->
+<!-- Paste the "done when" line from tasks/week-2.md and say how you checked it. -->
 
 ## Checks
 
