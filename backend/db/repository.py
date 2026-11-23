@@ -1064,26 +1064,136 @@ def decide(token: str, decision: str, actor_name: str | None = None) -> dict:
 # -------------------------------------------------------------- suggestion
 
 
-def save_suggestion(change_id, suggestion: dict, original_scope: str) -> dict:
-    """Keep an AI suggestion (advisory) as a new row. Changes no terms or status."""
+SUGGESTION_RESPONSES = ("accepted", "edited", "dismissed")
+
+
+def _optional_cents(value) -> int | None:
+    return None if value is None else _cents(value)
+
+
+def _add_suggestion(change_id, suggestion: dict, original_scope: str) -> AiSuggestion:
+    """Insert one suggestion row for a change that has not been reviewed yet."""
     context = _ctx()
     event = _lock_change(change_id)
     if event.status not in ("submitted", "in_review"):
         raise Conflict("This change has already been reviewed")
-    context.session.add(
-        AiSuggestion(
-            company_id=context.company_id,
-            change_event_id=event.id,
-            original_scope=original_scope,
-            suggested_scope=suggestion["scope"],
-            suggested_cost_cents=_cents(suggestion["amount"]),
-            suggested_timeline_days=suggestion["impact_days"],
-            rationale=suggestion["rationale"],
-            in_scope=suggestion["in_scope"],
-        )
+    low, high = _optional_cents(suggestion.get("amount_low")), _optional_cents(
+        suggestion.get("amount_high")
     )
+    if (low is None) != (high is None):
+        raise ValueError("Give both ends of the cost range, or neither.")
+    row = AiSuggestion(
+        company_id=context.company_id,
+        change_event_id=event.id,
+        original_scope=original_scope,
+        suggested_scope=suggestion["scope"],
+        suggested_cost_cents=_cents(suggestion["amount"]),
+        suggested_cost_low_cents=low,
+        suggested_cost_high_cents=high,
+        suggested_timeline_days=suggestion["impact_days"],
+        rationale=suggestion["rationale"],
+        in_scope=suggestion["in_scope"],
+        model_id=suggestion.get("model_id"),
+        confidence=suggestion.get("confidence"),
+        prompt_version=suggestion.get("prompt_version"),
+    )
+    context.session.add(row)
     context.session.flush()
+    return row
+
+
+def _suggestion_dict(row: AiSuggestion) -> dict:
+    """One stored suggestion. Money is integer cents, with dollars as the legacy keys."""
+    return dict(
+        id=row.id,
+        change_id=str(row.change_event_id),
+        in_scope=row.in_scope,
+        scope=row.suggested_scope,
+        original_scope=row.original_scope,
+        rationale=row.rationale,
+        currency=row.currency,
+        cost_cents=row.suggested_cost_cents,
+        cost_low_cents=row.suggested_cost_low_cents,
+        cost_high_cents=row.suggested_cost_high_cents,
+        amount=_dollars(row.suggested_cost_cents),
+        impact_days=row.suggested_timeline_days,
+        confidence=row.confidence,
+        model_id=row.model_id,
+        prompt_version=row.prompt_version,
+        created_at=_iso(row.created_at),
+        response=row.response,
+        rating=row.rating,
+        responded_by_id=row.responded_by_id,
+        responded_at=_iso(row.responded_at) if row.responded_at else None,
+    )
+
+
+def save_suggestion(change_id, suggestion: dict, original_scope: str) -> dict:
+    """Keep an AI suggestion (advisory) as a new row. Changes no terms or status.
+
+    The prototype's keys are scope, amount (dollars), impact_days, rationale and
+    in_scope. Optional keys: amount_low and amount_high (dollars, a range around
+    amount), confidence (0 to 1), model_id and prompt_version. Returns the dict
+    it was given, as the prototype did.
+    """
+    _add_suggestion(change_id, suggestion, original_scope)
     return suggestion
+
+
+def create_suggestion(change_id, suggestion: dict, original_scope: str) -> dict:
+    """The same as save_suggestion, but returns the stored row (with its id)."""
+    return _suggestion_dict(_add_suggestion(change_id, suggestion, original_scope))
+
+
+def list_suggestions(change_id) -> list[dict]:
+    """A change's suggestions, newest first. NotFound for another company's change."""
+    context = _ctx()
+    event = context.session.exec(
+        company_select(ChangeEvent, context.company_id).where(ChangeEvent.id == _id(change_id))
+    ).first()
+    if event is None:
+        raise NotFound("Not found")
+    rows = context.session.exec(
+        company_select(AiSuggestion, context.company_id)
+        .where(AiSuggestion.change_event_id == event.id)
+        .order_by(col(AiSuggestion.id).desc())
+    )
+    return [_suggestion_dict(row) for row in rows]
+
+
+def respond_to_suggestion(suggestion_id, response: str, actor_user_id: int, rating=None) -> dict:
+    """Record what the estimator did with a suggestion: accepted, edited or dismissed.
+
+    An optional rating from 1 to 5. A suggestion is answered once; a second
+    answer is a Conflict. This only records the response: it never changes the
+    change's terms or status, and the estimator still enters the cost.
+    """
+    context = _ctx()
+    if response not in SUGGESTION_RESPONSES:
+        raise ValueError("The response must be accepted, edited or dismissed.")
+    if rating is not None and (
+        isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5
+    ):
+        raise ValueError("The rating must be a whole number from 1 to 5.")
+    row = context.session.exec(
+        company_select(AiSuggestion, context.company_id)
+        .where(AiSuggestion.id == _id(suggestion_id))
+        .with_for_update()
+    ).first()
+    if row is None:
+        raise NotFound("Not found")
+    if row.response is not None:
+        raise Conflict("This suggestion has already been answered")
+    row.response = response
+    row.rating = rating
+    row.responded_by_id = actor_user_id
+    row.responded_at = utc_now()
+    context.session.add(row)
+    try:
+        context.session.flush()
+    except IntegrityError:
+        raise NotFound("Unknown user") from None
+    return _suggestion_dict(row)
 
 
 # --------------------------------------------------------------- work order

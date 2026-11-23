@@ -2,7 +2,7 @@
 
 `SQLModel.metadata.create_all()` creates missing tables but never changes an existing one. The shared Supabase database is changed only by the numbered SQL files in this folder, in order. Only Bona's agents add files here, and they are run against Supabase only with Bona's go-ahead, after review.
 
-Run them in this order: `0000`, `0001`, `0002`.
+Run them in this order: `0000`, `0001`, `0002`, `0003`.
 
 All three were run on the shared Supabase project (PostgreSQL 17) on Nov 13, in that order, and the demo seed (task B7) was applied afterwards. The shared project is on schema v2. The steps below are for any other database, such as a new project or a local PostgreSQL.
 
@@ -11,6 +11,7 @@ All three were run on the shared Supabase project (PostgreSQL 17) on Nov 13, in 
 | `0000_drop_empty_october_tables.sql` | Drops the three October prototype tables (`change_orders`, `notifications`, `"user"`), and only when all three are there in their October shape and every one is empty. With no `change_orders` table it changes nothing. |
 | `0001_nov3_baseline.sql` | Brings a database to the Nov 3 schema: creates the seven tables in an empty database, or just records the baseline when they already exist. |
 | `0002_schema_v2.sql` | Moves the Nov 3 schema to schema v2, the one in `backend/db/models.py` (task B2). |
+| `0003_ai_suggestion_v2.sql` | Adds the cost range, prompt version and the estimator's response and rating to `ai_suggestion` (task B9, week 2). **Not yet run on the shared Supabase project.** Bona runs it. |
 
 Each file runs in one transaction and records itself in the `schema_migration` table. A file stops with an error, and changes nothing, when the database is not in the state it expects or when it was already applied.
 

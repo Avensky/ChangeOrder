@@ -250,7 +250,34 @@ class AiSuggestion(SQLModel, table=True):
             "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
             name="ai_suggestion_confidence_valid",
         ),
+        CheckConstraint(
+            "suggested_cost_low_cents IS NULL OR suggested_cost_high_cents IS NULL "
+            "OR (suggested_cost_low_cents >= 0 AND suggested_cost_low_cents <= suggested_cost_cents "
+            "AND suggested_cost_cents <= suggested_cost_high_cents)",
+            name="ai_suggestion_cost_range_valid",
+        ),
+        CheckConstraint(
+            "(suggested_cost_low_cents IS NULL) = (suggested_cost_high_cents IS NULL)",
+            name="ai_suggestion_cost_range_both_or_neither",
+        ),
+        CheckConstraint(
+            "response IS NULL OR response IN ('accepted', 'edited', 'dismissed')",
+            name="ai_suggestion_response_valid",
+        ),
+        CheckConstraint(
+            "rating IS NULL OR (rating >= 1 AND rating <= 5)",
+            name="ai_suggestion_rating_valid",
+        ),
+        CheckConstraint(
+            "(response IS NULL) = (responded_by_id IS NULL) AND (response IS NULL) = (responded_at IS NULL)",
+            name="ai_suggestion_response_complete",
+        ),
+        CheckConstraint(
+            "rating IS NULL OR response IS NOT NULL",
+            name="ai_suggestion_rating_needs_response",
+        ),
         _same_company("ai_suggestion", "change_event_id", "change_event"),
+        _same_company("ai_suggestion", "responded_by_id", "user"),
         Index("ix_ai_suggestion_company_id_change_event_id", "company_id", "change_event_id"),
     )
 
@@ -269,6 +296,22 @@ class AiSuggestion(SQLModel, table=True):
     in_scope: bool
     model_id: str | None = None
     confidence: float | None = None
+    # The cost as a range, in cents. suggested_cost_cents stays the point estimate
+    # and lies between them. Both are set or both are empty.
+    suggested_cost_low_cents: int | None = Field(
+        default=None, sa_column=Column(BigInteger, nullable=True)
+    )
+    suggested_cost_high_cents: int | None = Field(
+        default=None, sa_column=Column(BigInteger, nullable=True)
+    )
+    # Which prompt produced it, so results stay comparable when the prompt changes.
+    prompt_version: str | None = None
+    # What the estimator did with it: accepted, edited or dismissed, an optional
+    # rating from 1 to 5, who responded and when. The suggestion decides nothing.
+    response: str | None = None
+    rating: int | None = None
+    responded_by_id: int | None = None
+    responded_at: datetime | None = Field(default=None, sa_column=_utc_column(nullable=True))
     created_at: datetime = Field(default_factory=utc_now, sa_column=_utc_column())
 
 

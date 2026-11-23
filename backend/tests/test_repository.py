@@ -809,6 +809,76 @@ class RepositoryTests(unittest.TestCase):
             with repository.atomic(self.cid):
                 repository.save_suggestion(change["id"], advice, "Replace kitchen cabinetry only")
 
+    def test_a_suggestion_keeps_its_range_model_and_prompt_and_can_be_answered_once(self):
+        change = self.submit()
+        advice = dict(
+            scope="Add three roof drains",
+            amount=6200.5,
+            amount_low=5000,
+            amount_high=7500,
+            impact_days=2,
+            rationale="The proposal excludes storm piping",
+            in_scope=False,
+            confidence=0.7,
+            model_id="us.anthropic.claude-sonnet-5-5",
+            prompt_version="2026-11-23.1",
+        )
+        with repository.atomic(self.cid):
+            stored = repository.create_suggestion(change["id"], advice, "Storm piping is not included")
+            estimator = next(u for u in repository._users_with_roles("estimator"))
+            estimator_id = estimator.id
+        self.assertEqual(
+            (stored["cost_low_cents"], stored["cost_cents"], stored["cost_high_cents"]),
+            (500_000, 620_050, 750_000),
+        )
+        self.assertEqual((stored["model_id"], stored["prompt_version"]), (advice["model_id"], advice["prompt_version"]))
+        self.assertEqual((stored["response"], stored["rating"]), (None, None))
+        with repository.atomic(self.cid):
+            answered = repository.respond_to_suggestion(stored["id"], "edited", estimator_id, rating=4)
+            listed = repository.list_suggestions(change["id"])
+            after = repository.get_change(change["id"])
+        self.assertEqual((answered["response"], answered["rating"], answered["responded_by_id"]), ("edited", 4, estimator_id))
+        self.assertIsNotNone(answered["responded_at"])
+        self.assertEqual([item["id"] for item in listed], [stored["id"]])
+        # Answering decides nothing: the terms and status are untouched.
+        self.assertEqual((after["amount"], after["status"]), (0, "submitted"))
+        with self.assertRaises(repository.Conflict):
+            with repository.atomic(self.cid):
+                repository.respond_to_suggestion(stored["id"], "accepted", estimator_id)
+
+    def test_suggestion_inputs_are_checked(self):
+        change = self.submit()
+        base = dict(scope="s", amount=10, impact_days=0, rationale="r", in_scope=True)
+        with repository.atomic(self.cid):
+            estimator_id = next(u for u in repository._users_with_roles("estimator")).id
+            one = repository.create_suggestion(change["id"], base, "scope text")
+        for response, rating in (("approved", None), ("accepted", 0), ("accepted", 6), ("accepted", True), ("accepted", 2.5)):
+            with self.subTest(response=response, rating=rating):
+                with self.assertRaises(ValueError):
+                    with repository.atomic(self.cid):
+                        repository.respond_to_suggestion(one["id"], response, estimator_id, rating=rating)
+        with self.assertRaises(ValueError):  # only one end of the range
+            with repository.atomic(self.cid):
+                repository.create_suggestion(change["id"], dict(base, amount_low=5), "scope text")
+        with self.assertRaises(repository.NotFound):
+            with repository.atomic(self.cid):
+                repository.respond_to_suggestion(999999, "accepted", estimator_id)
+        with self.assertRaises(repository.NotFound):  # a user who is not in the company
+            with repository.atomic(self.cid):
+                repository.respond_to_suggestion(one["id"], "accepted", 999999)
+
+    def test_suggestions_are_listed_only_for_their_own_company(self):
+        change = self.submit()
+        base = dict(scope="s", amount=10, impact_days=0, rationale="r", in_scope=True)
+        with repository.atomic(self.cid):
+            repository.create_suggestion(change["id"], base, "scope text")
+            repository.create_suggestion(change["id"], dict(base, amount=20), "scope text")
+            newest_first = [item["cost_cents"] for item in repository.list_suggestions(change["id"])]
+        self.assertEqual(newest_first, [2000, 1000])
+        with self.assertRaises(repository.NotFound):
+            with repository.atomic(self.other_id):
+                repository.list_suggestions(change["id"])
+
     # notifications and history helpers
     def test_notify_and_add_event_write_rows(self):
         change = self.submit()
