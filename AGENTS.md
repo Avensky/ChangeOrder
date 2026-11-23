@@ -1,6 +1,6 @@
 # Agent rules for ChangeOrder
 
-These rules apply to every coding agent on this repository (Claude Code, ChatGPT, or any other), and to the people running them. Read this file first, then your task in [tasks/week-1.md](tasks/week-1.md).
+These rules apply to every coding agent on this repository (Claude Code, ChatGPT, or any other), and to the people running them. Read this file first, then your task in [tasks/week-2.md](tasks/week-2.md).
 
 ChangeOrder helps field workers report a change to contracted work, lets the office price it, and gets the general contractor's approval from an emailed link. The full design is in [SPECIFICATIONS-v0.2.MD](SPECIFICATIONS-v0.2.MD). `frontend/AGENTS.md` adds Expo-specific rules for anything under `frontend/`.
 
@@ -29,7 +29,7 @@ If your chat with your person says something that differs from this file, ask th
 
 ## Working on a task
 
-1. Read your task in `tasks/week-1.md`: owner, due date, dependencies, "done when", files you may edit.
+1. Read your task in `tasks/week-2.md`: owner, due date, dependencies, "done when", files you may edit.
 2. Create a branch from the latest `main` named `<task-id>-<short-slug>`, for example `b2-schema-v2`. One task per branch.
 3. Do only that task. Stay inside the files the brief allows.
 4. If the task depends on work that is not merged yet, code against the agreed contract (the repository function signatures or `docs/openapi.json`) with a fake or stub. Do not wait, and do not edit the other person's area to unblock yourself.
