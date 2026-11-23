@@ -24,6 +24,11 @@ from db.store_selector import backend_name
 
 ALGORITHMS = ["ES256"]
 DEFAULT_AUDIENCE = "authenticated"
+# A server clock a second or two slow makes a token Supabase just issued look
+# "issued in the future" (iat), and PyJWT refuses it with no tolerance: every
+# sign-in then fails with a 401 on /api/v1/me. Allow a small, bounded skew.
+# Anything further out, and every expired token, is still refused.
+CLOCK_LEEWAY_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -97,6 +102,7 @@ def verify_access_token(token: str) -> str:
             algorithms=ALGORITHMS,
             audience=os.getenv("SUPABASE_JWT_AUDIENCE", "").strip() or DEFAULT_AUDIENCE,
             issuer=_issuer(),
+            leeway=CLOCK_LEEWAY_SECONDS,
             options={"require": ["exp", "sub", "iss", "aud"]},
         )
     except PyJWTError:
