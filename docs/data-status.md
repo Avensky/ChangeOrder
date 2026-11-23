@@ -10,10 +10,13 @@ Task B5. Tracks the data requested from Tad (Zack Smith Plumbing) on Nov 5, 2026
 - After the meeting: Bona emailed Tad a detailed outline of the request.
 - Tad's estimator was out when they met, so timing is unknown.
 - Wed Nov 18 (morning): Bona received five original project proposals and the five change orders for those projects from Tad. That is the minimum tier (rows 1 and 2). The files are kept outside this repository.
-- Tad is also preparing the matching invoices for the five change orders, expected from his accounting department within a couple of days of Nov 18. Bona asked for the final billed amount, the invoice date with a paid or approved marker, a labor and materials breakdown if available, a project and change order label on each invoice, and the same redaction as the first set. Row 1 stays `received` and gains the invoices when they arrive.
+- Wed Nov 18: Tad sent the five matching invoices. Each bills its change order as one lump sum, with no labor and materials breakdown, and some show retention. Tad says billed and approved amounts are normally the same.
+- Wed Nov 18: Tad also replied that three proposals were revised after the original (so the contract totals on some invoices are higher), that one large change was approved by phone and an email stands in for its change order, and that he is checking for declined or reduced change orders. He attached the revised proposals, that email and a GC schedule of values. Those attachments are in Bona's email and are not yet in the shared folder.
+- Thu Nov 19: Tad sent approval dates by change order letter. Some were approved in writing, some were requested by the client with no written approval, and some show no approval yet (they may have been by phone, text or the GC's portal). His letters run past the five projects, so a key to the letters is still needed.
+- Tad cannot provide a labor and materials breakdown, because his change orders are priced and billed as lump sums. He asked to see the new demo.
 - The Nov 13 follow-up is no longer needed for rows 1 and 2. The draft below is kept for reference only; edit it before any further request for the full tier (rows 3 to 8).
 
-**Bona updates the status column.** Rows 1 and 2 are `received` on Bona's word (Nov 18). Rows 3 to 8 stay "Bona to confirm": this page was written without access to Bona's email or to anything Tad has sent, so nothing here says whether those items have or have not arrived.
+**Bona updates the status column.** Rows 1 and 2 are `received` and rows 3 and 4 are `not expected`, on Bona's word and Tad's emails (Nov 18 and 19). Rows 5 to 8 stay "Bona to confirm": this page was written without access to Bona's email or to anything Tad has sent, so nothing here says whether those items have or have not arrived.
 
 ## Checklist of the Nov 5 request
 
@@ -21,10 +24,10 @@ Status values for Bona to use: `received`, `partial` (say what is missing), `not
 
 | # | Item | Why we need it | Tier | Concern Tad raised | Status |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Completed change order examples, each with the original request, final proposal, revisions, approval, final amounts and dates | The core examples the AI learns from: what was reported, how it was priced, and what was finally approved | Minimum (a handful); full (many more) | None recorded in the spec | `received` (Nov 18: five proposals and the five change orders for them) |
+| 1 | Completed change order examples, each with the original request, final proposal, revisions, approval, final amounts and dates | The core examples the AI learns from: what was reported, how it was priced, and what was finally approved | Minimum (a handful); full (many more) | None recorded in the spec | `received` (Nov 18: five proposals and the five change orders for them); the five invoices (Nov 18); more records and the approval key still open |
 | 2 | Original project proposals | The scope baseline. Tad's rule: anything absent from the original proposal is flagged as a likely change order | Minimum (the proposals behind the change orders in row 1); full (many more) | None recorded in the spec | `received` (Nov 18: five proposals and the five change orders for them) |
-| 3 | Labor hours and rates by trade | Cost breakdown, so a suggested cost can be built from hours and rates instead of a single total | Full | See row 8: rates may only be shareable as a redacted breakout | Bona to confirm |
-| 4 | Materials and quantities | Cost breakdown for the materials part of an estimate | Full | None recorded in the spec | Bona to confirm |
+| 3 | Labor hours and rates by trade | Cost breakdown, so a suggested cost can be built from hours and rates instead of a single total | Full | See row 8: rates may only be shareable as a redacted breakout | `not expected` (Nov 18: Tad bills change orders as lump sums and cannot provide a breakdown without rebuilding the numbers by hand) |
+| 4 | Materials and quantities | Cost breakdown for the materials part of an estimate | Full | None recorded in the spec | `not expected` (Nov 18: Tad bills change orders as lump sums and cannot provide a breakdown without rebuilding the numbers by hand) |
 | 5 | Equipment, subcontractor quotes, permits, overhead, markup, tax | The rest of the cost breakdown, so a suggestion covers the whole price and not only labor and materials | Full | None recorded in the spec | Bona to confirm |
 | 6 | Foreman daily reports, only those tied to change orders | Field context for a change: what the crew saw and did on the day | Full | There are plenty, but they are not yet redacted, so Tad will share only the ones tied to change orders | Bona to confirm |
 | 7 | Supplier quotes | Real material prices behind an estimate | Full | None. Tad said these are easy to provide | Bona to confirm |
