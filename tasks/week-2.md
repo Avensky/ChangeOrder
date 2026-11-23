@@ -4,6 +4,13 @@ Goal: reach the spec's Phase 2 gate. The estimator sees an AI scope-and-cost sug
 
 Con's framing from the Nov 19 meeting: the semester goal is to show the change order flow works end to end and that the AI gives believable estimates. It is not a finished product. The AI work comes first; hosting, private photos and the GC token are real hardening and follow it.
 
+What Tad's replies (Nov 18 and 19) changed:
+
+- **No labor and materials split exists.** Tad bills and prices change orders as lump sums, so the AI suggests a lump-sum range and nothing finer. Do not plan around a breakdown.
+- **The "extra" contract totals are explained.** Three proposals were revised after the original, and one large change was agreed by email and phone with no separate change order form. So the original proposal is the scope baseline, and the revisions are extra examples of a scope change and its price.
+- **Approvals are mostly informal.** Where Tad found approval dates, only some were written; others were phone, text or the GC's own portal, and work was sometimes requested before a change order went out. That is the gap the emailed GC link and the fast track address.
+- **More records may follow.** Tad is checking for declined or reduced change orders, and some change orders on one project are still waiting for the GC. The set of records may grow, so fix the held-out split before any run.
+
 Read [AGENTS.md](../AGENTS.md) first. Each brief gives the owner, due date, what the task depends on, the "done when" line, the files the task may edit, and the spec sections to read. Spec sections are in [SPECIFICATIONS-v0.2.MD](../SPECIFICATIONS-v0.2.MD).
 
 Dates are the plan's. **Wed Nov 25** is the last working day before Thanksgiving; there is no work expected Thu Nov 26 to Sun Nov 29. **Tue Dec 1** is the end of the week and the target for anything marked "after Thanksgiving". Bona schedules the next meeting with Con and Tad for the week of Nov 30; the work should be demo-ready by then. If a task will slip, say so in the PR or to the owner by Tue Nov 24.
@@ -22,22 +29,23 @@ Order of the main chains:
 - **Tad's data never enters the repository.** Not the files, excerpts, names or amounts, and not in PRs, issues or chat summaries. It lives in a private location outside the repo and stays on US servers. Results are reported as ranges and counts only. Anything about the NDA goes to Bona.
 - **Keys and secrets** live in each person's local `.env` and in the host's secret settings. The Supabase service-role key and AWS credentials are backend-only and are never put in a variable that starts with `EXPO_PUBLIC_`.
 - **AI is advisory.** It suggests scope and cost with a reason and a confidence; the estimator decides. It never approves anything and it does not receive photos.
-- **The fast-track rule is not yet confirmed by Con.** Do not change it. It is on the agenda for the next meeting.
+- **The fast-track rule is not yet confirmed by Con.** Do not change it. It is on the agenda for the next meeting. Tad's approval dates show work being requested before a change order was sent, which is evidence for the rule, not confirmation of it.
+- **Say what the data is not.** It has no labor and materials breakdown, the approval evidence is partial, and everything we have was billed at the approved lump sum. Reports must say so.
 
 ---
 
 ## B8 Data and AWS setup for the AI
 
 - **Owner:** Bona. **Due:** Mon Nov 23. **Depends on:** nothing.
-- **Task:** Put Tad's proposals, change orders and invoices in a private US-only S3 bucket, outside the repository. Confirm Amazon Bedrock model access for Claude Sonnet 5.5 and Claude Haiku 5.5 in a US region, and set an AWS budget alert for the $100 credit. Choose the held-out set: Con advised holding back 3 to 4 records to validate accuracy, so with five change orders, hold back three and use two as examples. Re-check the Bedrock prices in the cost brief and note the date.
-- **Done when:** The data is in the bucket and nowhere in the repo, model access works from a test call, the budget alert exists, and the split is written down without any content from the documents.
+- **Task:** Put Tad's proposals, change orders and invoices in a private US-only S3 bucket, outside the repository. Include the new documents from his Nov 18 reply (revised proposals for three projects, the email that serves as one project's change order, and a GC schedule of values); they are attachments in Bona's SDSU inbox and are not yet in the shared folder. Confirm Amazon Bedrock model access for Claude Sonnet 5.5 and Claude Haiku 5.5 in a US region, and set an AWS budget alert for the $100 credit. Choose the held-out set: Con advised holding back 3 to 4 records to validate accuracy, so with five change orders, hold back three and use two as examples. Fix the split before the worker runs and do not change it after seeing results, because Tad may send more records. Re-check the Bedrock prices in the cost brief and note the date.
+- **Done when:** The data is in the bucket and nowhere in the repo, model access works from a test call, the budget alert exists, the new documents are in the bucket, and the split is written down without any content from the documents.
 - **May edit:** `docs/ai-cost-brief.md`. Everything else for this task is outside the repository.
 - **Spec:** AI cost estimation.
 
 ## B9 Suggestion worker
 
 - **Owner:** Bona. **Due:** Tue Nov 24. **Depends on:** B8.
-- **Task:** Add a worker that takes a change order and the matching original proposal and returns a scope flag, a suggested cost range, a reason and a confidence. Start without a knowledge base: pass the matching proposal and the two example change orders with their billed amounts straight to the model, and add a knowledge base later when there is more data. Use a US region only. Extend `ai_suggestion` with a cost range, a prompt version and the estimator's response (accepted, edited or dismissed, plus a rating) in a migration. Photos are not an input.
+- **Task:** Add a worker that takes a change order and the matching original proposal and returns a scope flag, a suggested cost range, a reason and a confidence. Start without a knowledge base: pass the matching proposal and the two example change orders with their billed amounts straight to the model, and add a knowledge base later when there is more data. Use a US region only. Extend `ai_suggestion` with a cost range, a prompt version and the estimator's response (accepted, edited or dismissed, plus a rating) in a migration. Photos are not an input. The suggested cost is a lump-sum range, because there is no labor and materials breakdown. Compare against the original proposal, not a revised one, since a revision may already include the change.
 - **Done when:** A suggestion is produced for each held-out change order and stored with model id, prompt version, reason and confidence, and nothing from the documents is logged or committed.
 - **May edit:** `backend/ai/`, `backend/db/models.py`, `backend/db/migrations/` (new), `backend/db/repository.py`.
 - **Spec:** AI cost estimation; Data model and storage.
@@ -46,8 +54,8 @@ Order of the main chains:
 ## B10 Evaluation on held-out change orders
 
 - **Owner:** Bona. **Due:** Wed Nov 25. **Depends on:** B9.
-- **Task:** Run B9 on the three held-out change orders. Compare the scope flag with the reason each change was needed, and the cost range with the billed amount. Try both Sonnet 5.5 and Haiku 5.5 and note the cost per run. Replace the cost brief's assumed token counts with measured ones.
-- **Done when:** `docs/ai-poc-results.md` reports counts, ranges and costs only, with the limits stated: three cases, all approved at full price, so this shows judgment and not accuracy.
+- **Task:** Run B9 on the three held-out change orders. Compare the scope flag with the reason each change was needed, and the cost range with the billed amount. Try both Sonnet 5.5 and Haiku 5.5 and note the cost per run. Add the contract revisions as extra cases of a scope change and its price, kept apart from the held-out set. Do not use approval dates as ground truth; they are partial. Replace the cost brief's assumed token counts with measured ones.
+- **Done when:** `docs/ai-poc-results.md` reports counts, ranges and costs only, with the limits stated: three held-out cases, all billed at the approved lump sum, no labor and materials breakdown and only partial approval evidence, so this shows judgment and not accuracy.
 - **May edit:** `docs/ai-poc-results.md` (new), `docs/ai-cost-brief.md`.
 - **Spec:** AI cost estimation.
 
@@ -70,8 +78,8 @@ Order of the main chains:
 ## B13 Tad follow-up and next semester
 
 - **Owner:** Bona. **Due:** Tue Dec 1. **Depends on:** nothing.
-- **Task:** Send the follow-up to Tad for the missing change orders, a labor and materials split, and approval dates. Write a one-page note with two or three productization options (a SaaS product, or embedded in a company's own system), as Con suggested. Set up a conversation with Adi about continuing next semester. Nothing is sent without Bona.
-- **Done when:** The follow-up is sent, `docs/productization-options.md` exists, and the meeting with Adi is requested.
+- **Task:** Thank Tad for the Nov 18 and 19 replies. Ask only for what he can provide: any declined or reduced change orders he can share (he is checking), the change orders on one project that the GC has not yet approved, a key that maps his change order letters to the documents we hold (his letters run past the five projects), and confirmation of the approval for the project where the GC's reply "reads as a yes". Drop the request for a labor and materials split, which he cannot provide. Invite Tad to see the new demo, since he missed the meeting. Write a one-page note with two or three productization options (a SaaS product, or embedded in a company's own system), as Con suggested, and use the finding that most approvals are informal as one argument for the emailed link. Set up a conversation with Adi about continuing next semester. Nothing is sent without Bona.
+- **Done when:** The reply is sent, `docs/data-status.md` is updated with the new statuses (rows for labor and materials marked not available), `docs/productization-options.md` exists, and the meeting with Adi is requested.
 - **May edit:** `docs/productization-options.md` (new), `docs/data-status.md` (statuses only).
 - **Spec:** AI cost estimation (data from Tad).
 
