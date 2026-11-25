@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import Annotated
 
@@ -124,3 +125,25 @@ class WorkspaceChangeOut(ChangeOut):
     # Set only by the fast-track authorization, and only on high priority.
     authorized_at: str | None = None
     authorized_by: str | None = None
+
+
+# J8: the GC link token is exchanged once for a short-lived session.
+class ApprovalExchange(BaseModel):
+    # In the body, never the URL, so the token stays out of access logs.
+    token: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class ApprovalSessionOut(BaseModel):
+    # Send as "Authorization: Bearer <session>" to the /approval-session/proposal routes.
+    session: str
+    expires_at: datetime
+    change: WorkspaceChangeOut
+
+
+class GcDecision(BaseModel):
+    # Optional. A retry with the same key gets the first answer back, and the
+    # decision is recorded once either way. The page makes one key per press.
+    idempotency_key: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=8, max_length=200)]
+        | None
+    ) = None
