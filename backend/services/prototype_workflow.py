@@ -9,6 +9,7 @@ store.py itself gets no new behaviour.
 """
 
 import os
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from db.repository import Conflict, NotFound
@@ -151,6 +152,76 @@ def save_suggestion(change_id, suggestion: dict, original_scope: str) -> dict:
     c["suggestion"] = suggestion
     c["original_scope"] = original_scope
     return suggestion
+
+
+# J7: the repository's create_suggestion, list_suggestions and
+# respond_to_suggestion (B9 contract), on the prototype's change dicts so the
+# routes are the same on both backends. Kept on the change itself, like
+# c["suggestion"] above; store.py gains nothing.
+SUGGESTION_RESPONSES = ("accepted", "edited", "dismissed")
+_LEGACY_KEYS = ("scope", "amount", "impact_days", "rationale", "in_scope")
+
+
+def create_suggestion(change_id, suggestion: dict, original_scope: str) -> dict:
+    save_suggestion(change_id, {k: suggestion[k] for k in _LEGACY_KEYS}, original_scope)
+    c = store.CHANGES[str(change_id)]
+    low, high = suggestion.get("amount_low"), suggestion.get("amount_high")
+    if (low is None) != (high is None):
+        raise ValueError("Give both ends of the cost range, or neither.")
+    existing = [s["id"] for ch in store.CHANGES.values() for s in ch.get("ai_suggestions", [])]
+    row = dict(
+        id=max(existing, default=0) + 1,
+        change_id=str(change_id),
+        in_scope=suggestion["in_scope"],
+        scope=suggestion["scope"],
+        original_scope=original_scope,
+        rationale=suggestion["rationale"],
+        currency="USD",
+        cost_cents=_cents(suggestion["amount"]),
+        cost_low_cents=None if low is None else _cents(low),
+        cost_high_cents=None if high is None else _cents(high),
+        amount=suggestion["amount"],
+        impact_days=suggestion["impact_days"],
+        confidence=suggestion.get("confidence"),
+        model_id=suggestion.get("model_id"),
+        prompt_version=suggestion.get("prompt_version"),
+        created_at=datetime.now(timezone.utc).isoformat(),
+        response=None,
+        rating=None,
+        responded_by_id=None,
+        responded_at=None,
+    )
+    c.setdefault("ai_suggestions", []).append(row)
+    return dict(row)
+
+
+def list_suggestions(change_id) -> list[dict]:
+    c = get_change(change_id)
+    if c is None:
+        raise NotFound("Not found")
+    return [dict(s) for s in reversed(c.get("ai_suggestions", []))]
+
+
+def respond_to_suggestion(suggestion_id, response: str, actor_user_id, rating=None) -> dict:
+    if response not in SUGGESTION_RESPONSES:
+        raise ValueError("The response must be accepted, edited or dismissed.")
+    if rating is not None and (
+        isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5
+    ):
+        raise ValueError("The rating must be a whole number from 1 to 5.")
+    for c in store.CHANGES.values():
+        for row in c.get("ai_suggestions", []):
+            if str(row["id"]) == str(suggestion_id):
+                if row["response"] is not None:
+                    raise Conflict("This suggestion has already been answered")
+                row.update(
+                    response=response,
+                    rating=rating,
+                    responded_by_id=actor_user_id,
+                    responded_at=datetime.now(timezone.utc).isoformat(),
+                )
+                return dict(row)
+    raise NotFound("Not found")
 
 
 def list_notifications(to: str) -> list[dict]:

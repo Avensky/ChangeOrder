@@ -12,10 +12,12 @@ from schemas.changes import (
     ReviewTerms,
     Severity,
     Status,
-    Suggestion,
+    SuggestionOut,
     SuggestionRequest,
+    SuggestionResponse,
     WorkspaceChangeOut,
 )
+from ai import suggest as ai_suggest
 from services import email, prototype_workflow
 from services.photos import save_photo
 import core.config as config
@@ -248,22 +250,78 @@ def project_work_order(project_id: ProjectId, caller: Caller | None = Depends(ST
         return workflow.work_order(project_id)
 
 
-@router.post("/changes/{change_id}/suggestion", response_model=Suggestion)
+AI_UNAVAILABLE = "AI suggestions are not available. The office can enter cost and days manually."
+AI_UNUSABLE = "The AI reply could not be used. Try again, or enter cost and days manually."
+SUGGESTION_READERS = require_roles("estimator", "manager")
+
+
+@contextmanager
+def _suggestion_errors():
+    """The workflow errors, plus a bad response or rating as 422."""
+    with _workflow_errors():
+        try:
+            yield
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+
+
+def _change_text(c: dict) -> str:
+    """What the field reported: title and description. Text only, never photos."""
+    return "\n".join(part.strip() for part in (c.get("title") or "", c["description"]) if part.strip())
+
+
+@router.post("/changes/{change_id}/suggestion", response_model=SuggestionOut)
 def suggest(
     change_id: str,
     request: SuggestionRequest,
     caller: Caller | None = Depends(ESTIMATOR),
 ):
-    from services.suggestions import suggest_terms
+    """Ask the AI worker (B9) for a scope flag and a cost range, store it, return it.
 
+    Advice only: it sets no terms and no status, and the estimator still
+    enters the cost. The worker takes text only, so no photo reaches the model.
+    """
     with _workflow_errors(), _transaction(caller):
         c = workflow.get_change(change_id)
         if c is None:
             raise HTTPException(404, "Not found")
-        if c["status"] != "submitted":
+        if c["status"] not in ("submitted", "in_review"):
             raise HTTPException(409, "This change has already been reviewed")
-        record = dict(c)
-    result = suggest_terms(record, request.original_scope)
+        description = _change_text(c)
+    # Outside the transaction, so a slow model never holds the change's lock.
+    try:
+        result = ai_suggest.suggest(
+            change_description=description, original_proposal=request.original_scope
+        )
+    except ai_suggest.SuggestionUnavailable:
+        raise HTTPException(503, AI_UNAVAILABLE) from None
+    except ai_suggest.SuggestionError:
+        raise HTTPException(502, AI_UNUSABLE) from None
+    with _suggestion_errors(), _transaction(caller):
+        return workflow.create_suggestion(
+            change_id, result.as_repository_dict(), request.original_scope
+        )
+
+
+@router.get("/changes/{change_id}/suggestions", response_model=list[SuggestionOut])
+def list_suggestions(change_id: str, caller: Caller | None = Depends(SUGGESTION_READERS)):
+    """A change's suggestions, newest first, with the estimator's response if any."""
     with _workflow_errors(), _transaction(caller):
-        workflow.save_suggestion(change_id, result.model_dump(), request.original_scope)
-    return result
+        return workflow.list_suggestions(change_id)
+
+
+@router.post("/suggestions/{suggestion_id}/response", response_model=SuggestionOut)
+def respond_to_suggestion(
+    suggestion_id: str,
+    body: SuggestionResponse,
+    caller: Caller | None = Depends(ESTIMATOR),
+):
+    """Record accepted, edited or dismissed, and an optional 1 to 5 rating, once.
+
+    Who answered comes from the verified token, never the body. Answering
+    records the choice only: the change's terms and status do not move.
+    """
+    with _suggestion_errors(), _transaction(caller):
+        return workflow.respond_to_suggestion(
+            suggestion_id, body.response, _actor_id(caller), rating=body.rating
+        )
