@@ -640,24 +640,48 @@ class ChangeSubmissionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIsNone(self.client.get("/api/v1/changes").json()[0]["suggestion"])
 
-    def test_ai_advice_does_not_approve_or_set_terms(self):
-        from unittest.mock import patch
-        from schemas.changes import Suggestion
+    def bedrock(self, **reply):
+        """A fake Bedrock client answering in the B9 worker's JSON shape."""
+        from unittest.mock import MagicMock
+        import json
 
-        change = self.submit().json()
-        advice = Suggestion(
-            scope="Move and test outlet",
-            amount=200,
-            impact_days=1,
-            rationale="Assumes existing wiring is adequate",
+        body = dict(
             in_scope=False,
+            scope="Move and test outlet",
+            cost_low=150,
+            cost_best=200,
+            cost_high=260.5,
+            timeline_days=1,
+            rationale="Assumes existing wiring is adequate",
+            confidence=0.6,
         )
-        with patch("services.suggestions.suggest_terms", return_value=advice):
-            response = self.client.post(
-                "/api/v1/changes/" + change["id"] + "/suggestion",
+        body.update(reply)
+        model = MagicMock()
+        model.converse.return_value = {
+            "output": {"message": {"content": [{"text": json.dumps(body)}]}}
+        }
+        return model
+
+    def ask(self, change_id, model):
+        from unittest.mock import patch
+
+        environment = {"BEDROCK_MODEL_ID": "us.anthropic.claude-sonnet-5-5", "AWS_REGION": "us-east-1"}
+        with patch.dict("os.environ", environment), patch("boto3.client", return_value=model):
+            return self.client.post(
+                "/api/v1/changes/" + change_id + "/suggestion",
                 json={"original_scope": "Replace kitchen cabinetry only"},
             )
-        self.assertEqual(response.status_code, 200)
+
+    def test_ai_advice_does_not_approve_or_set_terms(self):
+        change = self.submit().json()
+        response = self.ask(change["id"], self.bedrock())
+        self.assertEqual(response.status_code, 200, response.text)
+        stored = response.json()
+        self.assertEqual(
+            (stored["cost_low_cents"], stored["cost_cents"], stored["cost_high_cents"]),
+            (15000, 20000, 26050),
+        )
+        self.assertEqual((stored["response"], stored["rating"]), (None, None))
         saved = self.client.get("/api/v1/changes").json()[0]
         self.assertEqual(saved["suggestion"]["amount"], 200)
         self.assertEqual(saved["amount"], 0)
@@ -669,49 +693,37 @@ class ChangeSubmissionTests(unittest.TestCase):
             0,
         )
 
-    def test_bedrock_response_is_validated_and_receives_saved_photos(self):
-        from unittest.mock import MagicMock, patch
-        import json
-
+    def test_no_photo_reaches_the_model_and_a_bad_reply_is_502(self):
         change = self.submit().json()
-        model = MagicMock()
-        advice = dict(
-            scope="Relocate the outlet",
-            amount=123.45,
-            impact_days=2,
-            rationale="Subject to site verification",
-            in_scope=False,
-        )
+        model = self.bedrock()
+        self.assertEqual(self.ask(change["id"], model).status_code, 200)
+        call = model.converse.call_args.kwargs
+        self.assertEqual(call["modelId"], "us.anthropic.claude-sonnet-5-5")
+        content = call["messages"][0]["content"]
+        # Text blocks only: no image, no document, and not the photo's bytes.
+        self.assertTrue(all(set(part) == {"text"} for part in content))
+        self.assertNotIn("image", repr(call))
+        self.assertNotIn(change["photo_keys"][0], repr(call))
         model.converse.return_value = {
-            "output": {"message": {"content": [{"text": json.dumps(advice)}]}}
+            "output": {"message": {"content": [{"text": "not valid JSON"}]}}
         }
-        route = "/api/v1/changes/" + change["id"] + "/suggestion"
-        with patch.dict("os.environ", {"BEDROCK_MODEL_ID": "test-model"}), patch(
-            "boto3.client", return_value=model
-        ):
-            self.assertEqual(
-                self.client.post(
-                    route, json={"original_scope": "Install kitchen cabinets only"}
-                ).json(),
-                advice,
-            )
-            call = model.converse.call_args.kwargs
-            self.assertEqual(call["modelId"], "test-model")
-            self.assertEqual(
-                call["messages"][0]["content"][1]["image"]["source"]["bytes"], PNG
-            )
-            model.converse.return_value = {
-                "output": {"message": {"content": [{"text": "not valid JSON"}]}}
-            }
-            self.assertEqual(
-                self.client.post(
-                    route, json={"original_scope": "Install kitchen cabinets only"}
-                ).status_code,
-                502,
-            )
+        self.assertEqual(self.ask(change["id"], model).status_code, 502)
         self.assertEqual(
             self.client.get("/api/v1/changes").json()[0]["status"], "submitted"
         )
+
+    def test_suggestions_are_listed_and_answered_once_on_the_prototype(self):
+        change = self.submit().json()
+        first = self.ask(change["id"], self.bedrock()).json()
+        second = self.ask(change["id"], self.bedrock(cost_best=210)).json()
+        listed = self.client.get("/api/v1/changes/" + change["id"] + "/suggestions").json()
+        self.assertEqual([s["id"] for s in listed], [second["id"], first["id"]])
+        route = "/api/v1/suggestions/" + str(first["id"]) + "/response"
+        answered = self.client.post(route, json={"response": "edited", "rating": 4})
+        self.assertEqual(answered.status_code, 200, answered.text)
+        self.assertEqual((answered.json()["response"], answered.json()["rating"]), ("edited", 4))
+        self.assertEqual(self.client.post(route, json={"response": "accepted"}).status_code, 409)
+        self.assertEqual(self.client.get("/api/v1/changes").json()[0]["status"], "submitted")
 
     def test_concurrent_approval_has_one_winner(self):
         from concurrent.futures import ThreadPoolExecutor

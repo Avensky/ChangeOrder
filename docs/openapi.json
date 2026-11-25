@@ -620,6 +620,7 @@
           "changes"
         ],
         "summary": "Suggest",
+        "description": "Ask the AI worker (B9) for a scope flag and a cost range, store it, return it.\n\nAdvice only: it sets no terms and no status, and the estimator still\nenters the cost. The worker takes text only, so no photo reaches the model.",
         "operationId": "suggest_api_v1_changes__change_id__suggestion_post",
         "parameters": [
           {
@@ -664,7 +665,139 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Suggestion"
+                  "$ref": "#/components/schemas/SuggestionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/changes/{change_id}/suggestions": {
+      "get": {
+        "tags": [
+          "changes"
+        ],
+        "summary": "List Suggestions",
+        "description": "A change's suggestions, newest first, with the estimator's response if any.",
+        "operationId": "list_suggestions_api_v1_changes__change_id__suggestions_get",
+        "parameters": [
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Change Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SuggestionOut"
+                  },
+                  "title": "Response List Suggestions Api V1 Changes  Change Id  Suggestions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/suggestions/{suggestion_id}/response": {
+      "post": {
+        "tags": [
+          "changes"
+        ],
+        "summary": "Respond To Suggestion",
+        "description": "Record accepted, edited or dismissed, and an optional 1 to 5 rating, once.\n\nWho answered comes from the verified token, never the body. Answering\nrecords the choice only: the change's terms and status do not move.",
+        "operationId": "respond_to_suggestion_api_v1_suggestions__suggestion_id__response_post",
+        "parameters": [
+          {
+            "name": "suggestion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Suggestion Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionResponse"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestionOut"
                 }
               }
             }
@@ -990,6 +1123,174 @@
         ],
         "title": "Suggestion"
       },
+      "SuggestionOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "change_id": {
+            "type": "string",
+            "title": "Change Id"
+          },
+          "in_scope": {
+            "type": "boolean",
+            "title": "In Scope"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "original_scope": {
+            "type": "string",
+            "title": "Original Scope"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "default": "USD"
+          },
+          "cost_cents": {
+            "type": "integer",
+            "title": "Cost Cents"
+          },
+          "cost_low_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Low Cents"
+          },
+          "cost_high_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost High Cents"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "impact_days": {
+            "type": "integer",
+            "title": "Impact Days"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "edited",
+                  "dismissed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "responded_by_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responded By Id"
+          },
+          "responded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responded At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "change_id",
+          "in_scope",
+          "scope",
+          "original_scope",
+          "rationale",
+          "cost_cents",
+          "amount",
+          "impact_days",
+          "created_at"
+        ],
+        "title": "SuggestionOut"
+      },
       "SuggestionRequest": {
         "properties": {
           "original_scope": {
@@ -1004,6 +1305,37 @@
           "original_scope"
         ],
         "title": "SuggestionRequest"
+      },
+      "SuggestionResponse": {
+        "properties": {
+          "response": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "edited",
+              "dismissed"
+            ],
+            "title": "Response"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          }
+        },
+        "type": "object",
+        "required": [
+          "response"
+        ],
+        "title": "SuggestionResponse"
       },
       "ValidationError": {
         "properties": {

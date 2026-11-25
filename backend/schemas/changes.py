@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
@@ -124,3 +124,35 @@ class WorkspaceChangeOut(ChangeOut):
     # Set only by the fast-track authorization, and only on high priority.
     authorized_at: str | None = None
     authorized_by: str | None = None
+
+
+# J7: a stored AI suggestion (B9 contract, docs/ai-suggestion-contract.md).
+# Advice only: it decides nothing. Money is integer cents; amount is the
+# legacy dollars key. The range is null on suggestions stored before B9.
+class SuggestionOut(BaseModel):
+    id: int
+    change_id: str
+    in_scope: bool
+    scope: str
+    original_scope: str
+    rationale: str
+    currency: Currency = "USD"
+    cost_cents: int
+    cost_low_cents: int | None = None
+    cost_high_cents: int | None = None
+    amount: float
+    impact_days: int
+    confidence: float | None = None
+    model_id: str | None = None
+    prompt_version: str | None = None
+    created_at: str
+    response: Literal["accepted", "edited", "dismissed"] | None = None
+    rating: int | None = None
+    responded_by_id: int | None = None
+    responded_at: str | None = None
+
+
+class SuggestionResponse(BaseModel):
+    # Who answered comes from the verified token, never from this body.
+    response: Literal["accepted", "edited", "dismissed"]
+    rating: int | None = Field(default=None, ge=1, le=5, strict=True)
