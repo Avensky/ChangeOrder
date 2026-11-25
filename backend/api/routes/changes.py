@@ -3,12 +3,15 @@ from contextlib import contextmanager
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, UploadFile
 from api.routes import session
 from core.auth import Caller, require_roles
 from schemas.changes import (
+    ApprovalExchange,
+    ApprovalSessionOut,
     Description,
     EstimatorReview,
+    GcDecision,
     ReviewTerms,
     Severity,
     Status,
@@ -16,7 +19,7 @@ from schemas.changes import (
     SuggestionRequest,
     WorkspaceChangeOut,
 )
-from services import email, prototype_workflow
+from services import email, gc_session, prototype_workflow
 from services.photos import save_photo
 import core.config as config
 from core.config import email_settings
@@ -210,29 +213,120 @@ def manager_authorize(change_id: str, caller: Caller | None = Depends(MANAGER)):
     return c
 
 
-# The GC link is token-only: no staff account, and no role check.
-@router.get("/approval-session", response_model=WorkspaceChangeOut)
-def approval_session(token: str):
+# The GC link is token-only: no staff account, and no role check. The page
+# exchanges the emailed token once for a short-lived session (J8), so the token
+# leaves the address bar, the history and the access logs. Every request looks
+# the link up again, so an expired or revoked link stops working at once.
+# Opening, exchanging or reloading never decides anything.
+
+INVALID_LINK = "This link is not valid. It may have expired or been replaced by a newer one."
+SESSION_ENDED = "This session has ended. Open the link in the email again."
+
+
+def _session_token(authorization: str | None) -> str:
+    """The link token inside an "Authorization: Bearer <session>" header, or 401."""
+    scheme, _, session = (authorization or "").partition(" ")
+    token = None
+    if scheme.lower() == "bearer" and session.strip():
+        token = gc_session.link_token(session.strip())
+    if token is None:
+        raise HTTPException(401, SESSION_ENDED, headers={"WWW-Authenticate": "Bearer"})
+    return token
+
+
+def _proposal(token: str):
     with workflow.atomic():
         c = workflow.change_for_token(token)
         if not c:
-            raise HTTPException(404, "Invalid link")
+            raise HTTPException(404, INVALID_LINK)
         return c
 
 
-def _decide(token, decision):
-    with _workflow_errors(), workflow.atomic():
-        return workflow.decide(token, decision)
+@router.post("/approval-session/exchange", response_model=ApprovalSessionOut)
+def exchange_link(body: ApprovalExchange):
+    change = _proposal(body.token)
+    session, expires_at = gc_session.issue(body.token)
+    return {"session": session, "expires_at": expires_at, "change": change}
+
+
+@router.get("/approval-session/proposal", response_model=WorkspaceChangeOut)
+def session_proposal(authorization: str | None = Header(None)):
+    return _proposal(_session_token(authorization))
+
+
+def _recorded(token: str, decision: str) -> dict | None:
+    """The answer for a decision that is already recorded, or None."""
+    with workflow.atomic():
+        c = workflow.change_for_token(token)
+    wanted = ("approved",) if decision == "approved" else ("declined", "rejected")
+    if c and c["status"] in wanted:
+        return {"status": c["status"]}
+    return None
+
+
+def _decide(token: str, decision: str, key: str | None = None):
+    """Record the GC's one decision. A retry with the same key gets the first answer.
+
+    The database allows one decision per request, so a retry never records a
+    second one. With a key, a retry that finds this same decision already
+    recorded gets 200 and the same body instead of a 409, so a page that lost
+    the first response does not show an error. A different decision is a 409.
+    """
+    link_hash = gc_session.token_hash(token)
+    if key:
+        seen = gc_session.idempotency_keys.get(link_hash, key)
+        if seen is not None:
+            if seen[0] != decision:
+                raise HTTPException(422, "This key was already used for a different decision")
+            return seen[1]
+    try:
+        with _workflow_errors(), workflow.atomic():
+            result = workflow.decide(token, decision)
+    except HTTPException as error:
+        # The key was forgotten (a restart) or two presses raced: fall back to
+        # what is recorded. Same decision: the same answer. Otherwise the 409.
+        replay = _recorded(token, decision) if key and error.status_code == 409 else None
+        if replay is None:
+            raise
+        result = replay
+    if key:
+        gc_session.idempotency_keys.put(link_hash, key, decision, result)
+    return result
+
+
+def _key(body: GcDecision | None) -> str | None:
+    return body.idempotency_key if body else None
+
+
+@router.post("/approval-session/proposal/approve")
+def session_approve(
+    body: GcDecision | None = Body(None), authorization: str | None = Header(None)
+):
+    return _decide(_session_token(authorization), "approved", _key(body))
+
+
+@router.post("/approval-session/proposal/decline")
+def session_decline(
+    body: GcDecision | None = Body(None), authorization: str | None = Header(None)
+):
+    return _decide(_session_token(authorization), "declined", _key(body))
+
+
+# LEGACY: the token in the query string, which the merged GC page still uses.
+# Remove when U8 moves the page onto /exchange and /proposal.
+@router.get("/approval-session", response_model=WorkspaceChangeOut)
+def approval_session(token: str):
+    return _proposal(token)
 
 
 @router.post("/approval-session/approve")
-def client_approve(token: str):
-    return _decide(token, "approved")
+def client_approve(token: str, body: GcDecision | None = Body(None)):
+    return _decide(token, "approved", _key(body))
 
 
 @router.post("/approval-session/decline")
-def client_decline(token: str):
-    return _decide(token, "declined")
+def client_decline(token: str, body: GcDecision | None = Body(None)):
+    return _decide(token, "declined", _key(body))
 
 
 @router.get("/notifications")

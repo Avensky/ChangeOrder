@@ -206,6 +206,28 @@ class ChangeSubmissionTests(unittest.TestCase):
         links = [line for line in self.printed if line.startswith("GC LINK:")]
         return links[-1].split("token=")[1].split()[0]
 
+    def test_the_gc_exchanges_the_link_for_a_session_and_decides_once(self):
+        # J8 on the prototype: the token goes in the body once, then the session.
+        change = self.submit().json()
+        self.client.post(
+            "/api/v1/changes/" + change["id"] + "/review",
+            json={"scope": "Relocate outlet", "proposed_cost_cents": 500, "requested_timeline_days": 1},
+        )
+        exchanged = self.client.post(
+            "/api/v1/approval-session/exchange", json={"token": self.gc_token()}
+        )
+        self.assertEqual(exchanged.status_code, 200, exchanged.text)
+        headers = {"Authorization": "Bearer " + exchanged.json()["session"]}
+        seen = self.client.get("/api/v1/approval-session/proposal", headers=headers)
+        self.assertEqual(seen.json()["status"], "awaiting_gc")  # opening decides nothing
+        body = {"idempotency_key": "proto-press-1"}
+        route = "/api/v1/approval-session/proposal/approve"
+        first = self.client.post(route, headers=headers, json=body)
+        again = self.client.post(route, headers=headers, json=body)
+        self.assertEqual((first.json(), again.json()), ({"status": "approved"},) * 2)
+        approved = [e for e in self.client.get("/api/v1/changes").json()[0]["history"] if e["kind"] == "approved"]
+        self.assertEqual(len(approved), 1)
+
     def test_estimator_terms_appear_on_the_gc_link(self):
         change = self.submit().json()
         review = self.client.post(
