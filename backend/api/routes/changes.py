@@ -8,19 +8,19 @@ from api.routes import session
 from core.auth import Caller, require_roles
 from schemas.changes import (
     Description,
+    ChangeWithPhotos,
     EstimatorReview,
+    PhotoLink,
     ReviewTerms,
     Severity,
     Status,
     Suggestion,
     SuggestionRequest,
-    WorkspaceChangeOut,
 )
 from services import email, prototype_workflow
-from services.photos import save_photo
-import core.config as config
+from services.photos import delete_photo, key_company, photo_links, save_photo
 from core.config import email_settings
-from db.repository import Conflict, NotFound
+from db.repository import Conflict, NotFound, default_company_id
 from db.store_selector import store
 
 # One set of workflow functions for both backends. The selected store is the
@@ -60,6 +60,31 @@ def _transaction(caller: Caller | None):
     return workflow.atomic(caller.company_id)
 
 
+def _company_id(caller: Caller | None) -> int:
+    return caller.company_id if caller else default_company_id()
+
+
+def _with_photos(changes: list[dict], company_id: int | None) -> list[dict]:
+    """Add each change's photo links (J9), signed in one batch for the list.
+
+    Only photos of company_id are signed; the API checked the caller (staff:
+    the verified token; GC: the link token) before this runs.
+    """
+    keys = [key for c in changes for key in (c.get("photo_keys") or [])]
+    links = {link["key"]: link for link in photo_links(keys, company_id)}
+    return [
+        dict(c, photos=[links[k] for k in (c.get("photo_keys") or []) if k in links])
+        for c in changes
+    ]
+
+
+def _with_photos_for_gc(change: dict) -> dict:
+    """The GC has no company of their own: the change's keys name it."""
+    keys = change.get("photo_keys") or []
+    company = next((key_company(k) for k in keys if key_company(k) is not None), None)
+    return _with_photos([change], company)[0]
+
+
 def _actor_id(caller: Caller | None):
     return None if caller is None else caller.id
 
@@ -69,7 +94,7 @@ def _approval_link(token: str) -> str:
     return f"{base}/approve?token={token}"
 
 
-@router.post("/changes", response_model=WorkspaceChangeOut, status_code=201)
+@router.post("/changes", response_model=ChangeWithPhotos, status_code=201)
 async def submit_change(
     description: Annotated[Description, Form()],
     severity: Severity = Form(Severity.normal),
@@ -82,11 +107,14 @@ async def submit_change(
     if not 1 <= len(photos) <= 10:
         raise HTTPException(422, "Attach between 1 and 10 photos.")
     keys = []
+    company_id = _company_id(caller)
     try:
+        # Upload first, then write the rows; if the write fails, the uploads
+        # are removed again so no orphan photo is left in storage.
         for photo in photos:
-            keys.append(await save_photo(photo))
+            keys.append(await save_photo(photo, company_id))
         with _workflow_errors(), _transaction(caller):
-            return workflow.create_change(
+            change = workflow.create_change(
                 description,
                 severity,
                 keys,
@@ -97,17 +125,33 @@ async def submit_change(
             )
     except BaseException:
         for key in keys:
-            (config.UPLOAD_DIR / key).unlink(missing_ok=True)
+            await delete_photo(key)
         raise
     finally:
         for photo in photos:
             await photo.close()
+    return _with_photos([change], company_id)[0]
 
 
-@router.get("/changes", response_model=list[WorkspaceChangeOut])
+@router.get("/changes", response_model=list[ChangeWithPhotos])
 def list_changes(status: Status | None = None, caller: Caller | None = Depends(STAFF)):
     with _workflow_errors(), _transaction(caller):
-        return workflow.list_changes(status)
+        changes = workflow.list_changes(status)
+    return _with_photos(changes, _company_id(caller))
+
+
+@router.get("/changes/{change_id}/photos", response_model=list[PhotoLink])
+def change_photos(change_id: str, caller: Caller | None = Depends(STAFF)):
+    """Fresh links for one change's photos, when the ones the app has expired.
+
+    404 for an unknown change or one of another company (the lookup is
+    company-filtered), so the answer never reveals that a change exists.
+    """
+    with _workflow_errors(), _transaction(caller):
+        c = workflow.get_change(change_id)
+        if c is None:
+            raise HTTPException(404, "Not found")
+    return _with_photos([c], _company_id(caller))[0]["photos"]
 
 
 # LEGACY: the float-money route the merged frontend still calls. Remove it
@@ -145,7 +189,7 @@ def admin_approve(
         return {"status": sent["status"]}
 
 
-@router.post("/changes/{change_id}/review", response_model=WorkspaceChangeOut)
+@router.post("/changes/{change_id}/review", response_model=ChangeWithPhotos)
 def estimator_review(
     change_id: str,
     terms: EstimatorReview = Body(...),
@@ -179,10 +223,10 @@ def estimator_review(
     # The console link is the fallback and stays printed either way, so the
     # demo works with no email key and when the provider is down.
     print("GC LINK:", link, "(emailed)" if sent_by_email else "(not emailed)")
-    return c
+    return _with_photos([c], _company_id(caller))[0]
 
 
-@router.post("/changes/{change_id}/authorize", response_model=WorkspaceChangeOut)
+@router.post("/changes/{change_id}/authorize", response_model=ChangeWithPhotos)
 def manager_authorize(change_id: str, caller: Caller | None = Depends(MANAGER)):
     """Fast track: the manager lets work start before the estimate exists.
 
@@ -207,17 +251,17 @@ def manager_authorize(change_id: str, caller: Caller | None = Depends(MANAGER)):
     # is nothing to decide until the estimator adds the cost.
     subject, body = email.fast_track_notice(c)
     email.send(email_settings()["gc_address"], subject, body)
-    return c
+    return _with_photos([c], _company_id(caller))[0]
 
 
 # The GC link is token-only: no staff account, and no role check.
-@router.get("/approval-session", response_model=WorkspaceChangeOut)
+@router.get("/approval-session", response_model=ChangeWithPhotos)
 def approval_session(token: str):
     with workflow.atomic():
         c = workflow.change_for_token(token)
         if not c:
             raise HTTPException(404, "Invalid link")
-        return c
+    return _with_photos_for_gc(c)
 
 
 def _decide(token, decision):

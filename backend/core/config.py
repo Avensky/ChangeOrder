@@ -33,3 +33,31 @@ def email_settings() -> dict:
         # change's company, so a per-change address is a later rename.
         gc_address=os.getenv("GC_EMAIL", "").strip(),
     )
+
+
+# Photo storage (J9, decision in docs/photo-storage.md). Read at call time.
+# With SUPABASE_SECRET_KEY set, photos go to the private bucket and are served
+# with short-lived signed links. Without it (a laptop with no secret key, and
+# the tests) they stay in the local uploads folder as before. The secret key
+# is backend-only: never EXPO_PUBLIC_, never in the repository.
+DEFAULT_PHOTO_BUCKET = "change-photos"
+DEFAULT_PHOTO_URL_TTL_SECONDS = 300
+
+
+def photo_settings() -> dict:
+    try:
+        ttl = int(os.getenv("PHOTO_URL_TTL_SECONDS", DEFAULT_PHOTO_URL_TTL_SECONDS))
+    except ValueError:
+        ttl = DEFAULT_PHOTO_URL_TTL_SECONDS
+    return dict(
+        supabase_url=os.getenv("SUPABASE_URL", "").strip().rstrip("/"),
+        secret_key=os.getenv("SUPABASE_SECRET_KEY", "").strip(),
+        bucket=os.getenv("PHOTO_BUCKET", "").strip() or DEFAULT_PHOTO_BUCKET,
+        ttl_seconds=max(30, min(ttl, 3600)),
+    )
+
+
+def photos_in_bucket() -> bool:
+    """True when photos live in the private bucket, False for the local folder."""
+    settings = photo_settings()
+    return bool(settings["supabase_url"] and settings["secret_key"])
