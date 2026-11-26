@@ -1,6 +1,5 @@
 import os
 from contextlib import contextmanager
-from decimal import Decimal
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
@@ -9,7 +8,6 @@ from core.auth import Caller, require_roles
 from schemas.changes import (
     Description,
     EstimatorReview,
-    ReviewTerms,
     Severity,
     Status,
     Suggestion,
@@ -64,6 +62,16 @@ def _actor_id(caller: Caller | None):
     return None if caller is None else caller.id
 
 
+def _gc_address(result: dict | None) -> str:
+    """Where the GC's email goes: the GC contact of the change's company (J10).
+
+    The workflow returns it as gc_email (the company's GC user). GC_EMAIL is
+    only the fallback, for the prototype and for a GC user with no email.
+    """
+    address = (result or {}).get("gc_email") or ""
+    return address.strip() or email_settings()["gc_address"]
+
+
 def _approval_link(token: str) -> str:
     base = os.getenv("APP_URL", "http://localhost:8081").rstrip("/")
     return f"{base}/approve?token={token}"
@@ -104,45 +112,23 @@ async def submit_change(
             await photo.close()
 
 
+def _visible_to(caller: Caller | None, changes: list[dict]) -> list[dict]:
+    """A field user sees only the changes they submitted (J10).
+
+    The submitter's user id comes from the repository's change dict
+    (submitted_by_user_id). A change without it is hidden from field users
+    rather than shown: the list fails closed. The estimator and manager see
+    every change in their company; the prototype (no sign-in) sees all.
+    """
+    if caller is None or caller.role != "field":
+        return changes
+    return [c for c in changes if c.get("submitted_by_user_id") == caller.id]
+
+
 @router.get("/changes", response_model=list[WorkspaceChangeOut])
 def list_changes(status: Status | None = None, caller: Caller | None = Depends(STAFF)):
     with _workflow_errors(), _transaction(caller):
-        return workflow.list_changes(status)
-
-
-# LEGACY: the float-money route the merged frontend still calls. Remove it
-# when U3 moves the app onto /review and /authorize.
-@router.post("/changes/{change_id}/admin-approve")
-def admin_approve(
-    change_id: str,
-    terms: ReviewTerms = Body(...),
-    caller: Caller | None = Depends(ESTIMATOR),
-):
-    with _workflow_errors(), _transaction(caller):
-        if workflow is prototype_workflow:
-            return workflow.legacy_admin_approve(
-                change_id, terms.amount, terms.impact_days, terms.scope
-            )
-        # On postgres the legacy route can only send to the GC. It never
-        # approves a high-priority change without the GC (AGENTS.md).
-        c = workflow.get_change(change_id)
-        if c is None:
-            raise HTTPException(404, "Not found")
-        if c["status"] != "submitted":
-            raise HTTPException(409, "This change has already been reviewed")
-        if c["severity"] == "high":
-            raise HTTPException(
-                409, "Fast-track changes use /authorize, then /review; the GC decides"
-            )
-        sent = workflow.send_to_gc(
-            change_id,
-            terms.scope,
-            Decimal(str(terms.amount)),
-            terms.impact_days,
-            actor_name=caller.name if caller else "Office Manager",
-            actor_user_id=_actor_id(caller),
-        )
-        return {"status": sent["status"]}
+        return _visible_to(caller, workflow.list_changes(status))
 
 
 @router.post("/changes/{change_id}/review", response_model=WorkspaceChangeOut)
@@ -175,7 +161,7 @@ def estimator_review(
     # Email only after the transaction commits: a link is never sent for a
     # review that was rolled back, and a slow provider never holds the lock.
     subject, body = email.approval_request(c, link)
-    sent_by_email = email.send(email_settings()["gc_address"], subject, body)
+    sent_by_email = email.send(_gc_address(sent), subject, body)
     # The console link is the fallback and stays printed either way, so the
     # demo works with no email key and when the provider is down.
     print("GC LINK:", link, "(emailed)" if sent_by_email else "(not emailed)")
@@ -197,7 +183,7 @@ def manager_authorize(change_id: str, caller: Caller | None = Depends(MANAGER)):
             raise HTTPException(409, "Only a high-priority change can be fast tracked")
         if c["status"] not in ("submitted", "in_review"):
             raise HTTPException(409, "This change is past the point of authorizing work")
-        workflow.authorize_to_proceed(
+        authorized = workflow.authorize_to_proceed(
             change_id,
             actor_name=caller.name if caller else "Manager",
             actor_user_id=_actor_id(caller),
@@ -206,7 +192,7 @@ def manager_authorize(change_id: str, caller: Caller | None = Depends(MANAGER)):
     # A heads-up only, sent after the commit. It carries no link, because there
     # is nothing to decide until the estimator adds the cost.
     subject, body = email.fast_track_notice(c)
-    email.send(email_settings()["gc_address"], subject, body)
+    email.send(_gc_address(authorized), subject, body)
     return c
 
 
@@ -236,8 +222,17 @@ def client_decline(token: str):
 
 
 @router.get("/notifications")
-def notifications(to: str, caller: Caller | None = Depends(STAFF)):
+def notifications(to: str | None = None, caller: Caller | None = Depends(STAFF)):
+    """The signed-in person's own notifications (J10).
+
+    The recipient comes from the verified token, so `to` is ignored when
+    someone is signed in. The prototype has no sign-in and still uses `to`.
+    """
     with _transaction(caller):
+        if caller is not None:
+            return workflow.list_notifications(str(caller.id))
+        if not to:
+            raise HTTPException(422, "Say whose notifications: to=admin, contractor or client")
         return workflow.list_notifications(to)
 
 

@@ -181,72 +181,6 @@
         }
       }
     },
-    "/api/v1/changes/{change_id}/admin-approve": {
-      "post": {
-        "tags": [
-          "changes"
-        ],
-        "summary": "Admin Approve",
-        "operationId": "admin_approve_api_v1_changes__change_id__admin_approve_post",
-        "parameters": [
-          {
-            "name": "change_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Change Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewTerms"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/changes/{change_id}/review": {
       "post": {
         "tags": [
@@ -503,14 +437,22 @@
           "changes"
         ],
         "summary": "Notifications",
+        "description": "The signed-in person's own notifications (J10).\n\nThe recipient comes from the verified token, so `to` is ignored when\nsomeone is signed in. The prototype has no sign-in and still uses `to`.",
         "operationId": "notifications_api_v1_notifications_get",
         "parameters": [
           {
             "name": "to",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "To"
             }
           },
@@ -888,42 +830,6 @@
           "role"
         ],
         "title": "MeOut"
-      },
-      "ReviewTerms": {
-        "properties": {
-          "scope": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 2000,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope"
-          },
-          "amount": {
-            "type": "number",
-            "multipleOf": 0.01,
-            "maximum": 100000000.0,
-            "minimum": 0.0,
-            "title": "Amount"
-          },
-          "impact_days": {
-            "type": "integer",
-            "maximum": 3650.0,
-            "minimum": 0.0,
-            "title": "Impact Days"
-          }
-        },
-        "type": "object",
-        "required": [
-          "amount",
-          "impact_days"
-        ],
-        "title": "ReviewTerms"
       },
       "Severity": {
         "type": "string",
