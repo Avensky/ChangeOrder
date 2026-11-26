@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import Annotated
 
@@ -103,6 +104,15 @@ class EstimatorReview(BaseModel):
     currency: Currency = "USD"
 
 
+class PhotoLink(BaseModel):
+    # J9: a short-lived signed link from the private bucket, or the /uploads
+    # path (no expiry) when photos are kept in the local folder. Ask for fresh
+    # links at GET /changes/{id}/photos when one expires; never store them.
+    key: str
+    url: str
+    expires_at: datetime | None = None
+
+
 class WorkspaceChangeOut(ChangeOut):
     code: str
     title: str
@@ -124,3 +134,13 @@ class WorkspaceChangeOut(ChangeOut):
     # Set only by the fast-track authorization, and only on high priority.
     authorized_at: str | None = None
     authorized_by: str | None = None
+
+
+class ChangeWithPhotos(WorkspaceChangeOut):
+    """A change as the API returns it: the repository's fields plus photo links.
+
+    The links are added by the route (J9), not stored, so WorkspaceChangeOut
+    stays exactly what the workflow returns.
+    """
+
+    photos: list[PhotoLink] = []

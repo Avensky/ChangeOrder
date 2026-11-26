@@ -96,7 +96,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkspaceChangeOut"
+                  "$ref": "#/components/schemas/ChangeWithPhotos"
                 }
               }
             }
@@ -161,9 +161,72 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/WorkspaceChangeOut"
+                    "$ref": "#/components/schemas/ChangeWithPhotos"
                   },
                   "title": "Response List Changes Api V1 Changes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/changes/{change_id}/photos": {
+      "get": {
+        "tags": [
+          "changes"
+        ],
+        "summary": "Change Photos",
+        "description": "Fresh links for one change's photos, when the ones the app has expired.\n\n404 for an unknown change or one of another company (the lookup is\ncompany-filtered), so the answer never reveals that a change exists.",
+        "operationId": "change_photos_api_v1_changes__change_id__photos_get",
+        "parameters": [
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Change Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PhotoLink"
+                  },
+                  "title": "Response Change Photos Api V1 Changes  Change Id  Photos Get"
                 }
               }
             }
@@ -298,7 +361,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkspaceChangeOut"
+                  "$ref": "#/components/schemas/ChangeWithPhotos"
                 }
               }
             }
@@ -357,7 +420,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkspaceChangeOut"
+                  "$ref": "#/components/schemas/ChangeWithPhotos"
                 }
               }
             }
@@ -399,7 +462,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkspaceChangeOut"
+                  "$ref": "#/components/schemas/ChangeWithPhotos"
                 }
               }
             }
@@ -759,6 +822,174 @@
         ],
         "title": "Body_submit_change_api_v1_changes_post"
       },
+      "ChangeWithPhotos": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "photo_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Photo Keys"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "submitted_by": {
+            "type": "string",
+            "title": "Submitted By"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "impact_days": {
+            "type": "integer",
+            "title": "Impact Days"
+          },
+          "sent_for_approval": {
+            "type": "boolean",
+            "title": "Sent For Approval"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryEvent"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "suggestion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Suggestion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approved_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved Scope"
+          },
+          "proposed_cost_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Cost Cents"
+          },
+          "requested_timeline_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Timeline Days"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "default": "USD"
+          },
+          "authorized_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized At"
+          },
+          "authorized_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized By"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/PhotoLink"
+            },
+            "type": "array",
+            "title": "Photos",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "description",
+          "severity",
+          "status",
+          "code",
+          "title",
+          "project_id",
+          "submitted_by",
+          "author",
+          "created_at",
+          "amount",
+          "impact_days",
+          "sent_for_approval",
+          "history"
+        ],
+        "title": "ChangeWithPhotos",
+        "description": "A change as the API returns it: the repository's fields plus photo links.\n\nThe links are added by the route (J9), not stored, so WorkspaceChangeOut\nstays exactly what the workflow returns."
+      },
       "EstimatorReview": {
         "properties": {
           "scope": {
@@ -888,6 +1119,36 @@
           "role"
         ],
         "title": "MeOut"
+      },
+      "PhotoLink": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "url"
+        ],
+        "title": "PhotoLink"
       },
       "ReviewTerms": {
         "properties": {
@@ -1044,165 +1305,6 @@
           "type"
         ],
         "title": "ValidationError"
-      },
-      "WorkspaceChangeOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Description"
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity"
-          },
-          "status": {
-            "$ref": "#/components/schemas/Status"
-          },
-          "photo_keys": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Photo Keys"
-          },
-          "code": {
-            "type": "string",
-            "title": "Code"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "project_id": {
-            "type": "string",
-            "title": "Project Id"
-          },
-          "submitted_by": {
-            "type": "string",
-            "title": "Submitted By"
-          },
-          "author": {
-            "type": "string",
-            "title": "Author"
-          },
-          "created_at": {
-            "type": "string",
-            "title": "Created At"
-          },
-          "amount": {
-            "type": "number",
-            "title": "Amount"
-          },
-          "impact_days": {
-            "type": "integer",
-            "title": "Impact Days"
-          },
-          "sent_for_approval": {
-            "type": "boolean",
-            "title": "Sent For Approval"
-          },
-          "history": {
-            "items": {
-              "$ref": "#/components/schemas/HistoryEvent"
-            },
-            "type": "array",
-            "title": "History"
-          },
-          "suggestion": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Suggestion"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "approved_scope": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Approved Scope"
-          },
-          "proposed_cost_cents": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Proposed Cost Cents"
-          },
-          "requested_timeline_days": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested Timeline Days"
-          },
-          "currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Currency",
-            "default": "USD"
-          },
-          "authorized_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Authorized At"
-          },
-          "authorized_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Authorized By"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "description",
-          "severity",
-          "status",
-          "code",
-          "title",
-          "project_id",
-          "submitted_by",
-          "author",
-          "created_at",
-          "amount",
-          "impact_days",
-          "sent_for_approval",
-          "history"
-        ],
-        "title": "WorkspaceChangeOut"
       }
     }
   }
