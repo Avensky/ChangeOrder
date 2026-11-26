@@ -8,7 +8,6 @@ store.CHANGES, moved here unchanged in behaviour so the routes can be shared.
 store.py itself gets no new behaviour.
 """
 
-import os
 from decimal import Decimal
 
 from db.repository import Conflict, NotFound
@@ -30,11 +29,6 @@ work_order = store.work_order
 
 REVIEWABLE = ("submitted", "in_review", "authorized_to_proceed")
 
-
-def approval_link_for(token: str) -> str:
-    """The GC's link. Only the prototype keeps the link in a notification."""
-    base = os.getenv("APP_URL", "http://localhost:8081").rstrip("/")
-    return f"{base}/approve?token={token}"
 
 # Legacy names the merged frontend still sends; the GC's words are the same.
 _ALIASES = {"awaiting_client": "awaiting_gc", "rejected": "declined"}
@@ -155,27 +149,3 @@ def save_suggestion(change_id, suggestion: dict, original_scope: str) -> dict:
 
 def list_notifications(to: str) -> list[dict]:
     return [n for n in store.NOTIFICATIONS if n["to"] == to]
-
-
-def legacy_admin_approve(change_id, amount, impact_days, scope) -> dict:
-    """LEGACY /admin-approve, prototype only. Remove with the route (see changes.py).
-
-    A high-priority change is approved here without the GC; that is the old
-    prototype rule and is kept only until the app moves to /authorize and /review.
-    """
-    c = store.CHANGES.get(str(change_id))
-    if c is None:
-        raise NotFound("Not found")
-    if c["status"] != "submitted":
-        raise Conflict("This change has already been reviewed")
-    c.update(amount=amount, impact_days=impact_days, approved_scope=scope or c["description"])
-    if c["severity"] == "high":
-        c["status"] = "approved"
-        add_event(c, "approved", "Urgent change approved; work order updated", "Office Manager")
-        notify("contractor", c["id"], "Approved; project work order updated")
-        return {"status": c["status"]}
-    token = issue_client_token(c["id"])
-    c.update(status="awaiting_client", sent_for_approval=True)
-    notify("client", c["id"], approval_link_for(token))
-    add_event(c, "awaiting_client", "Sent to approver", "Office Manager")
-    return {"status": c["status"]}

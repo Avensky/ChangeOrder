@@ -211,13 +211,14 @@ class RoutesOnRepositoryTests(unittest.TestCase):
             self.client.get("/api/v1/projects/north-park/work-order").json()["revision"], 0
         )
 
-    def test_legacy_route_never_approves_high_priority_without_the_gc(self):
+    def test_the_legacy_admin_approve_route_is_gone(self):
+        # J10 retired it; it could approve a high-priority change without the GC.
         change = self.submit(severity="high").json()
         response = self.client.post(
             f"/api/v1/changes/{change['id']}/admin-approve",
             json={"amount": 100.0, "impact_days": 1, "scope": "x"},
         )
-        self.assertEqual(response.status_code, 409)
+        self.assertIn(response.status_code, (404, 405))
         self.assertEqual(
             self.client.get("/api/v1/projects/north-park/work-order").json()["revision"], 0
         )

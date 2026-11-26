@@ -66,19 +66,6 @@ class Suggestion(BaseModel):
     in_scope: bool
 
 
-class ReviewTerms(BaseModel):
-    # LEGACY: the float-money body /admin-approve still accepts. Prefer
-    # EstimatorReview below, which carries integer cents per AGENTS.md.
-    scope: (
-        Annotated[
-            str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
-        ]
-        | None
-    ) = None
-    amount: float = Field(ge=0, le=100000000, allow_inf_nan=False, multiple_of=0.01)
-    impact_days: int = Field(ge=0, le=3650)
-
-
 # Three uppercase letters, matching B2's change_order_revision_currency_valid.
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
 

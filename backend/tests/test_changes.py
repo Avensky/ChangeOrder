@@ -152,17 +152,17 @@ class ChangeSubmissionTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/changes").json(), [])
         self.assertEqual(list(self.upload_dir.glob("*.png")), [])
 
-    def test_normal_priority_retains_client_approval_flow(self):
-        change = self.submit().json()
-        review = "/api/v1/changes/" + change["id"] + "/admin-approve"
-        self.assertEqual(
-            self.client.post(review, json={"amount": 123.45, "impact_days": 2}).json(),
-            {"status": "awaiting_client"},
+    def send(self, change_id, cents=12345, days=2, scope="Relocate outlet"):
+        """The estimator's review, which sends the change to the GC."""
+        return self.client.post(
+            "/api/v1/changes/" + change_id + "/review",
+            json={"scope": scope, "proposed_cost_cents": cents, "requested_timeline_days": days},
         )
-        notice = self.client.get(
-            "/api/v1/notifications", params={"to": "client"}
-        ).json()[0]
-        token = notice["msg"].split("token=")[1]
+
+    def test_normal_priority_retains_gc_approval_flow(self):
+        change = self.submit().json()
+        self.assertEqual(self.send(change["id"]).json()["status"], "awaiting_gc")
+        token = self.gc_token()
         self.assertEqual(
             self.client.get(
                 "/api/v1/approval-session", params={"token": token}
@@ -173,12 +173,7 @@ class ChangeSubmissionTests(unittest.TestCase):
             "/api/v1/approval-session/approve", params={"token": token}
         )
         self.assertEqual(decision.json(), {"status": "approved"})
-        self.assertEqual(
-            self.client.post(
-                review, json={"amount": 123.45, "impact_days": 2}
-            ).status_code,
-            409,
-        )
+        self.assertEqual(self.send(change["id"]).status_code, 409)
         self.assertEqual(
             self.client.post(
                 "/api/v1/approval-session/decline", params={"token": token}
@@ -186,19 +181,15 @@ class ChangeSubmissionTests(unittest.TestCase):
             409,
         )
 
-    def test_high_priority_retains_existing_admin_approval_rule(self):
+    def test_the_legacy_admin_approve_route_is_gone(self):
+        # J10: it could approve a high-priority change without the GC.
         change = self.submit(severity="high").json()
-        review = "/api/v1/changes/" + change["id"] + "/admin-approve"
-        self.assertEqual(
-            self.client.post(review, json={"amount": 123.45, "impact_days": 2}).json(),
-            {"status": "approved"},
+        response = self.client.post(
+            "/api/v1/changes/" + change["id"] + "/admin-approve",
+            json={"amount": 123.45, "impact_days": 2},
         )
-        self.assertEqual(
-            self.client.post(
-                review, json={"amount": 123.45, "impact_days": 2}
-            ).status_code,
-            409,
-        )
+        self.assertIn(response.status_code, (404, 405))
+        self.assertEqual(self.client.get("/api/v1/changes").json()[0]["status"], "submitted")
 
     def gc_token(self):
         # The GC gets the link in the console line (or the email), never in a
@@ -532,18 +523,12 @@ class ChangeSubmissionTests(unittest.TestCase):
                 ("photos", ("b.png", PNG, "image/png")),
             ],
         ).json()
-        route = "/api/v1/changes/" + change["id"] + "/admin-approve"
-        terms = {
-            "amount": 123.45,
-            "impact_days": 2,
-            "scope": "Relocate and test outlet per revised plan",
-        }
-        self.assertEqual(self.client.post(route, json=terms).status_code, 200)
+        terms = {"scope": "Relocate and test outlet per revised plan"}
+        self.assertEqual(self.send(change["id"], scope=terms["scope"]).status_code, 200)
         self.assertEqual(
             self.client.get("/api/v1/projects/harbor/work-order").json()["revision"], 0
         )
-        notices = self.client.get("/api/v1/notifications?to=client").json()
-        token = notices[-1]["msg"].split("token=")[1]
+        token = self.gc_token()
         self.assertEqual(
             self.client.post(
                 "/api/v1/approval-session/approve", params={"token": token}
@@ -572,7 +557,7 @@ class ChangeSubmissionTests(unittest.TestCase):
             ).status_code,
             409,
         )
-        self.assertEqual(self.client.post(route, json=terms).status_code, 409)
+        self.assertEqual(self.send(change["id"], scope=terms["scope"]).status_code, 409)
         self.assertEqual(
             self.client.get("/api/v1/projects/harbor/work-order").json(), order
         )
@@ -582,16 +567,8 @@ class ChangeSubmissionTests(unittest.TestCase):
 
     def test_declined_changes_do_not_update_work_order(self):
         change = self.submit().json()
-        self.client.post(
-            "/api/v1/changes/" + change["id"] + "/admin-approve",
-            json={"amount": 500, "impact_days": 1},
-        )
-        token = (
-            self.client.get("/api/v1/notifications?to=client")
-            .json()[-1]["msg"]
-            .split("token=")[1]
-        )
-        self.client.post("/api/v1/approval-session/decline", params={"token": token})
+        self.send(change["id"], cents=50000, days=1)
+        self.client.post("/api/v1/approval-session/decline", params={"token": self.gc_token()})
         self.assertEqual(
             self.client.get("/api/v1/projects/north-park/work-order").json()[
                 "revision"
@@ -601,12 +578,12 @@ class ChangeSubmissionTests(unittest.TestCase):
 
     def test_invalid_terms_cannot_partially_review_a_change(self):
         change = self.submit().json()
-        route = "/api/v1/changes/" + change["id"] + "/admin-approve"
+        route = "/api/v1/changes/" + change["id"] + "/review"
         for terms in [
-            {"amount": -1, "impact_days": 0},
-            {"amount": 1.001, "impact_days": 0},
-            {"amount": 1, "impact_days": 0.5},
-            {"amount": 1, "impact_days": -1},
+            {"proposed_cost_cents": -1, "requested_timeline_days": 0},
+            {"proposed_cost_cents": 1.5, "requested_timeline_days": 0},
+            {"proposed_cost_cents": 100, "requested_timeline_days": 0.5},
+            {"proposed_cost_cents": 100, "requested_timeline_days": -1},
         ]:
             self.assertEqual(self.client.post(route, json=terms).status_code, 422)
         self.assertEqual(
@@ -717,15 +694,8 @@ class ChangeSubmissionTests(unittest.TestCase):
         from concurrent.futures import ThreadPoolExecutor
 
         change = self.submit().json()
-        self.client.post(
-            "/api/v1/changes/" + change["id"] + "/admin-approve",
-            json={"amount": 500, "impact_days": 1},
-        )
-        token = (
-            self.client.get("/api/v1/notifications?to=client")
-            .json()[-1]["msg"]
-            .split("token=")[1]
-        )
+        self.send(change["id"], cents=50000, days=1)
+        token = self.gc_token()
         with ThreadPoolExecutor(max_workers=2) as pool:
             statuses = list(
                 pool.map(
