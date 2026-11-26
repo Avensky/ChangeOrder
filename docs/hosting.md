@@ -176,6 +176,46 @@ Decisions for Bona:
 - **Render region.** It cannot be changed after the service is created, so choose it carefully.
 - **Cloudflare's note.** New projects are pointed to Workers; revisit if Pages shows a deprecation date.
 
+## J11 preparation (Nov 26, nothing deployed)
+
+Hosting is on hold until the Render account exists (after the meeting with Con). This section is what J11 needs on the day, so the first deploy is settings only.
+
+**Render service settings.**
+
+| Setting | Value |
+| --- | --- |
+| Root directory | `backend` |
+| Runtime | Python. `backend/.python-version` pins `3.12`, the version CI uses. Also set `PYTHON_VERSION=3.12` in case Render reads only the variable. |
+| Build command | `pip install -r requirements.txt` |
+| Start command | `python -m uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Health check path | `/health` |
+| Auto-deploy | After CI checks pass, branch `main` |
+
+The start command was run locally on Nov 26 (`PORT=8011`, `--host 127.0.0.1`) and `/health` answered `{"status":"ok"}`. Render passes the port in `PORT`. That is from memory, not a page read for this document, so confirm it on the service's settings page. `/health` touches neither the database nor sign-in (`backend/tests/test_health.py`), so a paused or slow Supabase project never fails the health check or makes Render restart the API.
+
+**Settings added since B12** (names only). These come from J8, J9 and J10. They go in Render's environment settings with the table above.
+
+| Name | Secret? | Notes |
+| --- | --- | --- |
+| `SUPABASE_SECRET_KEY` | **yes** | J9. With it set, photos go to the private bucket and `/uploads` is not served. Without it, photos are saved on Render's disk, which is wiped on every deploy, so it is **required** on the host. |
+| `PHOTO_BUCKET` | no | J9. Default `change-photos`. |
+| `PHOTO_URL_TTL_SECONDS` | no | J9. Default `300`. |
+| `GC_SESSION_SECRET` | **yes** | J8. Any long random string. Without it, each process makes its own key, so GC sessions end on every restart or deploy and the GC has to reopen the emailed link. |
+| `GC_SESSION_MINUTES` | no | J8. Default `30`. |
+| `APPROVAL_LINK_DAYS` | no | How long an emailed GC link stays valid. Default `14`. |
+| `GC_EMAIL` | no | After J10 it is only the fallback when the company's GC user has no email. |
+
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `EMAIL_API_KEY`, `SUPABASE_SECRET_KEY` and `GC_SESSION_SECRET` are the secrets. None of them may appear in a variable starting with `EXPO_PUBLIC_`, in the repository or in chat.
+
+**On the day, in order.**
+1. Bona creates the Render service with the settings above. Pick the region next to the Supabase project, because it cannot be changed later.
+2. Add the variables from both tables. `APP_URL` and `CORS_ORIGINS` wait for the Pages address (see "How the three addresses must be set").
+3. Deploy. Open `https://<service>.onrender.com/health`.
+4. Run the smoke test against the hosted database from a laptop, then sign in with the three test accounts from the hosted web build.
+5. Send one change to the GC and open the emailed link from a phone on mobile data.
+
+**Keep-alive.** Not built. Bona is deciding this week between a paid Supabase plan and a keep-alive. If it is a keep-alive, it should be a separate small job that runs a trivial query every few days, not part of `/health`.
+
 ## Not verified
 
 - Render's Starter price ($7) and Standard ($25): the pricing page did not return prices when fetched; the figure comes from a search result quoting it. Whether paid instances are billed by the second: same source.
