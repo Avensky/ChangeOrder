@@ -27,6 +27,12 @@ let unauthorizedHandler: (() => void) | null = null;
 export function setAccessToken(value: string | null) { accessToken = value; }
 export function setUnauthorizedHandler(value: (() => void) | null) { unauthorizedHandler = value; }
 
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
+
 export async function requestJson<T>(
   path: string,
   options: RequestInit = {},
@@ -57,7 +63,7 @@ export async function requestJson<T>(
         : Array.isArray(detail)
           ? detail.map((item: { msg: string }) => item.msg).join('; ')
           : 'Backend returned HTTP ' + response.status;
-      throw new Error(message);
+      throw new ApiError(response.status, message);
     }
     return await response.json() as T;
   } catch (error) {
