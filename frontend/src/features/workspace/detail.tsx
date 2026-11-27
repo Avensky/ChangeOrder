@@ -12,10 +12,10 @@ import {
   X,
 } from "lucide-react-native";
 import { useState } from "react";
-import { Modal, Pressable, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, Text, View } from "react-native";
 
-import { requestJson } from "@/lib/api";
-import type { Suggestion } from "@/features/change-orders/types";
+import { SuggestionPanel } from "./suggestion-panel";
+import { invalidTermsMessage, parseProposalTerms, ProposalTermsFields } from "./proposal-terms";
 
 import { useWorkspace } from "./context";
 import {
@@ -59,48 +59,19 @@ export function ChangeDetailScreen() {
 }
 
 function ChangeDetail({ change }: { change: WorkspaceChange }) {
-  const { role, review, authorize, decide, refresh } = useWorkspace();
-  const [amount, setAmount] = useState(String(change.amount));
-  const [days, setDays] = useState(String(change.impactDays));
+  const { role, review, authorize, decide } = useWorkspace();
+  const [draft, setDraft] = useState({
+    scope: change.approvedScope ?? change.description, amount: String(change.amount), days: String(change.impactDays),
+  });
+  const [savingFeedback, setSavingFeedback] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState<
     "approve" | "decline" | null
   >(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [originalScope, setOriginalScope] = useState("");
-  const [suggestion, setSuggestion] = useState<Suggestion | null>(
-    change.suggestion ?? null,
-  );
-  const [suggesting, setSuggesting] = useState(false);
-  const [scope, setScope] = useState(change.approvedScope ?? change.description);
   const photoUris =
     change.photoUris ?? (change.photoUri ? [change.photoUri] : []);
-  async function suggest() {
-    setSuggesting(true);
-    setError("");
-    try {
-      const result = await requestJson<Suggestion>(
-        "/api/v1/changes/" + encodeURIComponent(change.id) + "/suggestion",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ original_scope: originalScope }),
-        },
-        60000,
-      );
-      setSuggestion(result);
-      await refresh();
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not generate a suggestion.",
-      );
-    } finally {
-      setSuggesting(false);
-    }
-  }
   const project = getProject(change.projectId);
   const isApprover = role === "approver";
   const reviewable = ["submitted", "in_review", "authorized_to_proceed"].includes(change.status);
@@ -114,18 +85,16 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
         : 2;
 
   async function sendForReview() {
-    if (busy) return;
-    const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(amount.trim());
-    const cost = match ? Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0")) : NaN;
-    const impact = /^\d+$/.test(days.trim()) ? Number(days) : NaN;
-    if (!Number.isSafeInteger(cost) || cost > 10_000_000_000 || !Number.isInteger(impact) || impact > 3650 || !scope.trim()) {
-      setError("Enter a USD cost with at most two decimal places, 0–3650 whole days, and a work scope.");
+    if (busy || savingFeedback) return;
+    const terms = parseProposalTerms(draft);
+    if (!terms) {
+      setError(invalidTermsMessage);
       return;
     }
     setBusy(true);
     setError("");
     try {
-      await review(change.id, cost, impact, scope);
+      await review(change.id, terms.cost, terms.impact, terms.scope);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -387,6 +356,11 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
             )}
           </Card>
 
+          {role === "office" && change.source === "connected" && (
+            <SuggestionPanel change={change} reviewable={reviewable} disabled={busy}
+              onApply={setDraft} onSavingResponse={setSavingFeedback} />
+          )}
+
           <Card className="border-[#CEDFCB] p-5">
             {role === "manager" && change.severity === "high" && ["submitted", "in_review"].includes(change.status) ? (
               <>
@@ -409,103 +383,13 @@ function ChangeDetail({ change }: { change: WorkspaceChange }) {
                   Add a proposed cost and schedule impact before moving this
                   change forward.
                 </Text>
-                {change.source === "connected" && (
-                  <View className="mb-5 gap-3">
-                    <Text className="text-[12px] font-semibold text-ink">
-                      AI estimate assistant
-                    </Text>
-                    <Text className="text-[11px] leading-5 text-muted">
-                      Paste the approved original scope. AI compares it with
-                      this report. Photos are context for people. Review all assumptions
-                      before using the suggestion.
-                    </Text>
-                    <TextInput
-                      accessibilityLabel="Original approved scope"
-                      value={originalScope}
-                      onChangeText={setOriginalScope}
-                      multiline
-                      maxLength={10000}
-                      placeholder="Original approved scope of work"
-                      className="min-h-[90px] rounded-xl border border-line p-3 text-ink"
-                    />
-                    <Button
-                      variant="secondary"
-                      onPress={suggest}
-                      busy={suggesting}
-                      disabled={busy || originalScope.trim().length < 10}
-                    >
-                      Generate suggestion
-                    </Button>
-                    {!!suggestion && (
-                      <View className="gap-2 rounded-xl bg-canvas p-3">
-                        <Text className="text-[12px] font-semibold text-ink">
-                          Unverified suggestion ·{" "}
-                          {suggestion.in_scope
-                            ? "Likely in scope"
-                            : "Likely extra work"}
-                        </Text>
-                        <Text className="text-[12px] text-ink">
-                          {suggestion.scope}
-                        </Text>
-                        <Text className="text-[12px] text-ink">
-                          {money(suggestion.amount)} · {suggestion.impact_days}{" "}
-                          additional days
-                        </Text>
-                        <Text className="text-[11px] leading-5 text-muted">
-                          {suggestion.rationale}
-                        </Text>
-                        <Button
-                          variant="secondary"
-                          disabled={busy}
-                          onPress={() => {
-                            setAmount(String(suggestion.amount));
-                            setDays(String(suggestion.impact_days));
-                            setScope(suggestion.scope);
-                          }}
-                        >
-                          Use suggestion for review
-                        </Button>
-                      </View>
-                    )}
-                  </View>
-                )}
-                <Text className="mb-2 text-[10px] font-semibold text-ink">
-                  Proposed work scope
-                </Text>
-                <TextInput
-                  accessibilityLabel="Proposed work scope"
-                  value={scope}
-                  onChangeText={setScope}
-                  multiline
-                  maxLength={2000}
-                  className="mb-4 min-h-[90px] rounded-xl border border-line bg-canvas p-3 text-[13px] text-ink"
-                />
-                <Text className="mb-2 text-[10px] font-semibold text-ink">
-                  Proposed cost ($)
-                </Text>
-                <TextInput
-                  accessibilityLabel="Proposed cost"
-                  value={amount}
-                  onChangeText={setAmount}
-                  keyboardType="decimal-pad"
-                  className="mb-4 min-h-[44px] rounded-xl border border-line bg-canvas px-3 text-[13px] text-ink"
-                />
-                <Text className="mb-2 text-[10px] font-semibold text-ink">
-                  Additional days
-                </Text>
-                <TextInput
-                  accessibilityLabel="Additional days"
-                  value={days}
-                  onChangeText={setDays}
-                  keyboardType="number-pad"
-                  className="mb-4 min-h-[44px] rounded-xl border border-line bg-canvas px-3 text-[13px] text-ink"
-                />
+                <ProposalTermsFields draft={draft} onChange={setDraft} disabled={busy || savingFeedback} />
                 {change.severity === "high" && (
                   <Text className="mb-4 text-[10px] leading-4 text-ochre">
                     The manager authorizes urgent work before estimation. The GC still approves or declines the cost.
                   </Text>
                 )}
-                <Button onPress={sendForReview} busy={busy} icon={Send}>
+                <Button onPress={sendForReview} busy={busy} disabled={savingFeedback} icon={Send}>
                   Send estimate to GC
                 </Button>
               </>

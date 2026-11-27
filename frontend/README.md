@@ -72,3 +72,9 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+### Estimator suggestion preview
+
+To try U7 before the J7 API or AI model is available, set `EXPO_PUBLIC_SUGGESTION_PREVIEW=true` in `frontend/.env` and restart Expo. Sign in as an estimator, open a fictional submitted change, and select **Generate sample suggestion**. The fixture runs on the device. Sample ratings reset on reload. Accepting or applying edits fills the proposal draft. **Send estimate to GC** still uses the normal workflow.
+
+For the connected flow, remove the preview setting and restart Expo. The panel reads J7’s saved suggestions and enables generation once that route responds. Manual proposal entry stays available on older API builds.
